@@ -3,6 +3,36 @@ export interface Message {
   content: string;
 }
 
+// ── Tool-calling types ────────────────────────────────────────────────────────
+
+export interface ToolParameterSchema {
+  type: string;
+  description?: string;
+  enum?: string[];
+}
+
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  parameters: {
+    type: 'object';
+    properties: Record<string, ToolParameterSchema>;
+    required?: string[];
+  };
+}
+
+export interface ToolCall {
+  id?: string;
+  name: string;
+  arguments: Record<string, unknown>;
+}
+
+export interface ChatWithToolsResponse {
+  content: string | null;
+  toolCalls?: ToolCall[];
+  usage?: TokenUsage;
+}
+
 export interface TokenUsage {
   promptTokens: number;
   completionTokens: number;
@@ -33,4 +63,10 @@ export interface ProviderAdapter {
   validateCredentials(): Promise<void>;
   streamCompletion(request: CompletionRequest): AsyncIterable<StreamChunk>;
   listModels(): Promise<string[]>;
+  /** Optional: single non-streaming turn that may return tool calls. */
+  chatWithTools?(
+    messages: Message[],
+    tools: ToolDefinition[],
+    options?: Pick<CompletionRequest, 'model' | 'temperature' | 'maxTokens' | 'systemPrompt'>
+  ): Promise<ChatWithToolsResponse>;
 }

@@ -1,4 +1,4 @@
-import type { ProviderAdapter, ProviderInfo, CompletionRequest, StreamChunk, Message } from './base.js';
+import type { ProviderAdapter, ProviderInfo, CompletionRequest, StreamChunk, Message, ToolDefinition, ToolCall, ChatWithToolsResponse } from './base.js';
 import { JamError } from '../utils/errors.js';
 
 const DEFAULT_BASE_URL = 'http://localhost:11434';
@@ -214,5 +214,94 @@ export class OllamaAdapter implements ProviderAdapter {
         };
       }
     }
+  }
+
+  /**
+   * Single non-streaming turn that supports Ollama tool calling.
+   * Returns the assistant's text content and/or an array of tool calls.
+   */
+  async chatWithTools(
+    messages: Message[],
+    tools: ToolDefinition[],
+    options: Pick<CompletionRequest, 'model' | 'temperature' | 'maxTokens' | 'systemPrompt'> = {}
+  ): Promise<ChatWithToolsResponse> {
+    const ollamaMessages: OllamaMessage[] = [];
+
+    if (options.systemPrompt) {
+      ollamaMessages.push({ role: 'system', content: options.systemPrompt });
+    }
+    ollamaMessages.push(...toOllamaMessages(messages));
+
+    const body = {
+      model: options.model ?? this.model,
+      messages: ollamaMessages,
+      tools: tools.map((t) => ({
+        type: 'function' as const,
+        function: { name: t.name, description: t.description, parameters: t.parameters },
+      })),
+      stream: false,
+      options: {
+        ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+        ...(options.maxTokens !== undefined ? { num_predict: options.maxTokens } : {}),
+      },
+    };
+
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(120_000),
+      });
+    } catch (err) {
+      throw new JamError(
+        `Failed to connect to Ollama at ${this.baseUrl}`,
+        'PROVIDER_UNAVAILABLE',
+        { retryable: true, cause: err }
+      );
+    }
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      throw new JamError(
+        `Ollama error ${response.status}: ${errorText}`,
+        'PROVIDER_STREAM_ERROR',
+        { retryable: false, statusCode: response.status }
+      );
+    }
+
+    interface OllamaToolCallResponse {
+      message: {
+        role: string;
+        content: string | null;
+        tool_calls?: Array<{
+          function: { name: string; arguments: Record<string, unknown> };
+        }>;
+      };
+      prompt_eval_count?: number;
+      eval_count?: number;
+    }
+
+    const data = (await response.json()) as OllamaToolCallResponse;
+    const msg = data.message;
+
+    const toolCalls: ToolCall[] | undefined = msg.tool_calls?.map((tc) => ({
+      name: tc.function.name,
+      arguments: tc.function.arguments,
+    }));
+
+    const promptTokens = data.prompt_eval_count ?? 0;
+    const completionTokens = data.eval_count ?? 0;
+
+    return {
+      content: msg.content ?? null,
+      toolCalls: toolCalls?.length ? toolCalls : undefined,
+      usage: {
+        promptTokens,
+        completionTokens,
+        totalTokens: promptTokens + completionTokens,
+      },
+    };
   }
 }

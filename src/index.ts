@@ -43,6 +43,7 @@ program
   .option('--file <path>', 'read prompt from file')
   .option('--json', 'output response as JSON')
   .option('--system <prompt>', 'override the system prompt')
+  .option('--no-tools', 'disable read-only tool use (file discovery off)')
   .action(async (prompt: string | undefined, cmdOpts: Record<string, unknown>) => {
     const g = globalOpts();
     const { runAsk } = await import('./commands/ask.js');
@@ -55,6 +56,7 @@ program
       file: cmdOpts['file'] as string | undefined,
       json: cmdOpts['json'] as boolean | undefined,
       system: cmdOpts['system'] as string | undefined,
+      tools: cmdOpts['tools'] as boolean | undefined,
     });
   });
 
