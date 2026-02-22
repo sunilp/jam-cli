@@ -11,6 +11,8 @@ import {
   loadProjectContext,
   buildSystemPrompt,
   enrichUserPrompt,
+  generateSearchPlan,
+  buildSynthesisReminder,
   validateAnswer,
   buildCorrectionMessage,
 } from '../utils/agent.js';
@@ -167,6 +169,9 @@ function ChatApp({
       const abortController = new AbortController();
       abortRef.current = abortController;
 
+      // ── Build system prompt (used for BOTH tool gathering AND streaming) ──
+      let agentSystemPrompt: string | undefined;
+
       // ── Agentic tool-gathering phase ─────────────────────────────────────
       // Run read-only tool rounds to gather context before giving final answer.
       if (provider.chatWithTools && !abortController.signal.aborted) {
@@ -176,19 +181,34 @@ function ChatApp({
           const toolMessages = [...conversationRef.current];
           const tracker = new ToolCallTracker();
 
-          const toolSystemPrompt =
+          agentSystemPrompt =
             profile?.systemPrompt ??
             buildSystemPrompt(jamContext, workspaceCtx);
 
-          // Enrich the last user message with search guidance
+          // ── Planning phase: reason about what to search for ──────────
+          setStreamingText('🔍 Planning search strategy…');
+          const projectCtxForPlan = jamContext ?? workspaceCtx;
+
+          // Get the user's original question (last user message, before enrichment)
+          const originalQuestion = trimmed;
+
+          const searchPlan = await generateSearchPlan(
+            provider,
+            originalQuestion,
+            projectCtxForPlan,
+            { model: profile?.model, temperature: profile?.temperature, maxTokens: profile?.maxTokens },
+          );
+
+          // Enrich the last user message with the search plan
           const lastMsg = toolMessages[toolMessages.length - 1];
           if (lastMsg && lastMsg.role === 'user') {
             toolMessages[toolMessages.length - 1] = {
               ...lastMsg,
-              content: enrichUserPrompt(lastMsg.content),
+              content: enrichUserPrompt(lastMsg.content, searchPlan),
             };
           }
 
+          let synthesisInjected = false;
           const MAX_TOOL_ROUNDS = 15;
           for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
             if (abortController.signal.aborted) break;
@@ -197,13 +217,33 @@ function ChatApp({
               model: profile?.model,
               temperature: profile?.temperature,
               maxTokens: profile?.maxTokens,
-              systemPrompt: toolSystemPrompt,
+              systemPrompt: agentSystemPrompt,
             });
 
             if (!response.toolCalls?.length) {
-              // Self-validate the answer
               const finalText = response.content ?? '';
-              const validation = validateAnswer(finalText, tracker.totalCalls > 0);
+
+              // Synthesis grounding: remind model of the original question
+              if (tracker.totalCalls > 0 && !synthesisInjected && round < MAX_TOOL_ROUNDS - 2) {
+                synthesisInjected = true;
+
+                // Check if current answer is already relevant
+                if (finalText.trim().length > 0) {
+                  const validation = validateAnswer(finalText, true, originalQuestion);
+                  if (validation.valid) {
+                    conversationRef.current = toolMessages;
+                    break;
+                  }
+                }
+
+                setStreamingText('⟳ Grounding answer to your question…');
+                toolMessages.push({ role: 'assistant', content: finalText });
+                toolMessages.push({ role: 'user', content: buildSynthesisReminder(originalQuestion) });
+                continue;
+              }
+
+              // Self-validate the answer
+              const validation = validateAnswer(finalText, tracker.totalCalls > 0, originalQuestion);
 
               if (!validation.valid && round < MAX_TOOL_ROUNDS - 2) {
                 setStreamingText('⟳ Retrying for a better answer…');
@@ -260,6 +300,9 @@ function ChatApp({
         }
         setStreamingText('');
       }
+
+      // Use the same system prompt for streaming as the tool-gathering phase
+      const effectiveSystemPrompt = agentSystemPrompt ?? profile?.systemPrompt;
       let fullResponse = '';
       let interrupted = false;
 
@@ -269,7 +312,7 @@ function ChatApp({
           model: profile?.model,
           temperature: profile?.temperature,
           maxTokens: profile?.maxTokens,
-          systemPrompt: profile?.systemPrompt,
+          systemPrompt: effectiveSystemPrompt,
         });
 
         for await (const chunk of stream) {

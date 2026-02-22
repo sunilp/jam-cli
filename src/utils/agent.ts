@@ -2,10 +2,12 @@
  * Shared agentic-loop intelligence for `jam ask`, `jam chat`, and `jam run`.
  *
  * This module provides:
+ * - Search planner (separate LLM reasoning step before tool use)
  * - ReAct-style system prompt builder (with JAM.md / workspace context)
- * - Query/prompt enrichment with search strategy guidance
+ * - Query/prompt enrichment with plan-driven search guidance
  * - Tool-call loop detection, duplicate skipping, and correction hints
- * - Answer self-validation (JSON detection, too-short, empty)
+ * - Answer self-validation (JSON detection, too-short, empty, off-topic)
+ * - Synthesis grounding (reminds model of original question before answering)
  *
  * Individual commands wire these into their own UI layer (stdout streaming,
  * Ink TUI, or plain stderr).
@@ -14,6 +16,7 @@
 import { readdir } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { loadContextFile } from './context.js';
+import type { ProviderAdapter } from '../providers/base.js';
 
 // ── ANSI helpers ──────────────────────────────────────────────────────────────
 
@@ -138,8 +141,10 @@ export function buildSystemPrompt(
     '- NEVER pass an empty string as a search query.',
     '- NEVER output raw JSON as your answer. Always respond in clean, readable Markdown.',
     '- NEVER ask the user for information you can discover by reading code.',
+    '- NEVER just describe code you read. Always answer the user\'s SPECIFIC question.',
     '- ALWAYS read files to verify your understanding before answering.',
     '- ALWAYS reference specific file paths and line numbers in your answer.',
+    '- ALWAYS relate your findings back to the user\'s original question.',
     '- When you have gathered enough context, provide a clear, well-structured Markdown answer with code snippets.',
     ...(options.mode === 'readwrite' ? [
       '- For write operations, explain what you are changing and why BEFORE making the change.',
@@ -148,36 +153,161 @@ export function buildSystemPrompt(
   ].filter(Boolean).join('\n');
 }
 
+// ── Search planner (deep reasoning step) ──────────────────────────────────────
+
+const PLANNER_SYSTEM_PROMPT = `You are a search planner for a code assistant. Your job is to analyze the user's question and create a focused search plan.
+
+You will receive:
+1. A user's question about a codebase
+2. Project context (language, framework, directory structure)
+
+You must output a search plan with:
+1. QUESTION INTENT: What the user is really asking (1 sentence)
+2. KEY CONCEPTS: What code constructs relate to this question (function names, class names, patterns, file names)
+3. SEARCH QUERIES: 3-5 specific strings to search for in the codebase (actual code identifiers, NOT English words)
+4. DIRECTORIES: Which directories to explore first
+
+Be VERY specific. For example:
+- "where to add chatgpt as LLM" → search for: "ProviderAdapter", "createProvider", "OllamaProvider", "factory" — NOT "chatgpt" or "llm"
+- "how does auth work" → search for: "authenticate", "token", "session", "middleware", "login" — NOT "auth" or "security"
+- "where is the database connection" → search for: "createConnection", "pool", "DataSource", "prisma", "knex" — NOT "database"
+
+Output ONLY the plan in the exact format above. Be concise.`;
+
+/**
+ * Generate a search plan by asking the model to reason about what to search for.
+ * This is a separate LLM call (no tools) that produces a focused plan
+ * for the agentic tool loop.
+ *
+ * Returns the plan text, or null if planning fails.
+ */
+export async function generateSearchPlan(
+  provider: ProviderAdapter,
+  question: string,
+  projectContext: string,
+  options: { model?: string; temperature?: number; maxTokens?: number },
+): Promise<string | null> {
+  try {
+    const planRequest = {
+      messages: [{
+        role: 'user' as const,
+        content: [
+          `User's question: "${question}"`,
+          '',
+          'Project context:',
+          projectContext,
+          '',
+          'Create a search plan for finding the answer in this codebase.',
+        ].join('\n'),
+      }],
+      model: options.model,
+      temperature: 0.3, // Low temperature for focused planning
+      maxTokens: 400,   // Plan should be concise
+      systemPrompt: PLANNER_SYSTEM_PROMPT,
+    };
+
+    let plan = '';
+    const stream = provider.streamCompletion(planRequest);
+    for await (const chunk of stream) {
+      if (!chunk.done) plan += chunk.delta;
+    }
+
+    const trimmed = plan.trim();
+    // Sanity check: plan should be non-empty and not too short
+    if (trimmed.length < 20) return null;
+    return trimmed;
+  } catch {
+    // Planning failure is non-fatal
+    return null;
+  }
+}
+
 // ── Query expansion / prompt enrichment ───────────────────────────────────────
 
 /**
  * Enrich the user's prompt with search strategy guidance.
- * Helps the model think about what code identifiers to search for
- * instead of searching for vague English terms.
+ * If a search plan is provided, integrates it for focused searching.
+ * Otherwise falls back to generic search guidance.
  */
-export function enrichUserPrompt(prompt: string): string {
+export function enrichUserPrompt(prompt: string, searchPlan?: string | null): string {
+  const parts = [prompt];
+
+  if (searchPlan) {
+    parts.push(
+      '',
+      '---',
+      '',
+      '## Your Search Plan',
+      '',
+      searchPlan,
+      '',
+      '## Instructions',
+      '',
+      '- Follow the search plan above. Start with the suggested search queries.',
+      '- After finding relevant files, READ them to understand the full context.',
+      '- Once you have enough information, answer the user\'s SPECIFIC question.',
+      '- Do NOT just describe code you read. Directly answer what the user asked.',
+      '- Reference specific file paths and line numbers.',
+      '- Show relevant code snippets.',
+      '- Format your answer in clean Markdown.',
+      '- Do NOT output JSON.',
+    );
+  } else {
+    parts.push(
+      '',
+      '---',
+      '**Before you search, THINK about the user\'s question:**',
+      '1. What concepts does the user\'s question involve?',
+      '2. What are the likely function names, class names, file names, or variable names in the code for those concepts?',
+      '3. Plan 2–3 different search queries using those specific identifiers.',
+      '',
+      '**Search strategy:**',
+      '- NEVER search for vague/generic words. Search for specific code identifiers (function names, class names, imports).',
+      '- If the user asks about "LLM calls", search for `fetch`, `api/chat`, `streamCompletion`, `chatWithTools`, `provider`, `adapter` — not "llm".',
+      '- If the user asks about "database", search for `query`, `connection`, `pool`, `prisma`, `knex`, `sequelize` — not "database".',
+      '- If a search returns no results, try a DIFFERENT term, not the same one again.',
+      '- Use `glob="*.ts"` for TypeScript projects to avoid searching compiled files.',
+      '- After finding relevant files, use read_file to understand the full context.',
+      '',
+      '**When answering:**',
+      '- Directly answer the user\'s SPECIFIC question. Do NOT just describe code.',
+      '- Give a direct, specific answer with file paths and line numbers.',
+      '- Show relevant code snippets.',
+      '- Format your answer in clean Markdown.',
+      '- Do NOT output JSON. Do NOT ask the user clarifying questions — find the answer yourself.',
+    );
+  }
+
+  return parts.join('\n');
+}
+
+// ── Synthesis grounding ───────────────────────────────────────────────────────
+
+/**
+ * Build a synthesis reminder that grounds the model back to the original question.
+ * Injected as a user message when the model is about to give its final answer
+ * (i.e., returns no tool calls after gathering context).
+ */
+export function buildSynthesisReminder(originalQuestion: string): string {
   return [
-    prompt,
+    `[IMPORTANT — ANSWER THE QUESTION]`,
     '',
-    '---',
-    '**Before you search, THINK about the user\'s question:**',
-    '1. What concepts does the user\'s question involve?',
-    '2. What are the likely function names, class names, file names, or variable names in the code for those concepts?',
-    '3. Plan 2–3 different search queries using those specific identifiers.',
+    `The user's original question was: "${originalQuestion}"`,
     '',
-    '**Search strategy:**',
-    '- NEVER search for vague/generic words. Search for specific code identifiers (function names, class names, imports).',
-    '- If the user asks about "LLM calls", search for `fetch`, `api/chat`, `streamCompletion`, `chatWithTools`, `provider`, `adapter` — not "llm".',
-    '- If the user asks about "database", search for `query`, `connection`, `pool`, `prisma`, `knex`, `sequelize` — not "database".',
-    '- If a search returns no results, try a DIFFERENT term, not the same one again.',
-    '- Use `glob="*.ts"` for TypeScript projects to avoid searching compiled files.',
-    '- After finding relevant files, use read_file to understand the full context.',
+    'Based on ALL the code you examined, answer this specific question directly.',
     '',
-    '**When answering:**',
-    '- Give a direct, specific answer with file paths and line numbers.',
-    '- Show relevant code snippets.',
-    '- Format your answer in clean Markdown.',
-    '- Do NOT output JSON. Do NOT ask the user clarifying questions — find the answer yourself.',
+    'Your answer MUST:',
+    '1. Directly address what the user asked — do NOT just describe code',
+    '2. Reference specific files, line numbers, and code snippets',
+    '3. If the user asked "where" or "how", give specific locations and steps',
+    '4. If the user asked about adding/changing something, explain what files to modify and how',
+    '',
+    'Your answer MUST NOT:',
+    '- Describe irrelevant code that doesn\'t answer the question',
+    '- Be a generic overview of the project',
+    '- Repeat tool output verbatim',
+    '',
+    'Format your answer in clean, readable Markdown.',
   ].join('\n');
 }
 
@@ -250,8 +380,16 @@ export interface ValidationResult {
 /**
  * Check if the model's final answer looks acceptable.
  * Returns { valid: false, reason } if it looks like garbage.
+ *
+ * @param text          The model's answer text
+ * @param hadToolCalls  Whether the model used tools (stricter validation if so)
+ * @param originalQuestion  Optional: the user's original question for relevance checking
  */
-export function validateAnswer(text: string, hadToolCalls: boolean): ValidationResult {
+export function validateAnswer(
+  text: string,
+  hadToolCalls: boolean,
+  originalQuestion?: string,
+): ValidationResult {
   const trimmed = text.trim();
 
   if (trimmed.length === 0) {
@@ -269,7 +407,65 @@ export function validateAnswer(text: string, hadToolCalls: boolean): ValidationR
     return { valid: false, reason: 'Your answer was too short and unhelpful.' };
   }
 
+  // Relevance check: does the answer relate to the original question?
+  if (originalQuestion && hadToolCalls && trimmed.length > 50) {
+    const relevance = checkAnswerRelevance(originalQuestion, trimmed);
+    if (!relevance.relevant) {
+      return { valid: false, reason: relevance.reason };
+    }
+  }
+
   return { valid: true };
+}
+
+// Stop words to ignore in relevance checking
+const STOP_WORDS = new Set([
+  'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+  'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+  'should', 'may', 'might', 'can', 'shall', 'to', 'of', 'in', 'for',
+  'on', 'with', 'at', 'by', 'from', 'as', 'into', 'through', 'during',
+  'before', 'after', 'above', 'below', 'between', 'out', 'off', 'over',
+  'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when',
+  'where', 'why', 'how', 'all', 'each', 'every', 'both', 'few', 'more',
+  'most', 'other', 'some', 'such', 'no', 'not', 'only', 'own', 'same',
+  'so', 'than', 'too', 'very', 'just', 'because', 'but', 'and', 'or',
+  'if', 'while', 'about', 'this', 'that', 'these', 'those', 'what',
+  'which', 'who', 'whom', 'its', 'it', 'you', 'your', 'we', 'our',
+  'they', 'their', 'i', 'me', 'my', 'change', 'adding', 'using', 'make',
+]);
+
+/**
+ * Basic relevance check: extract key terms from the question and see
+ * if the answer mentions at least some of them (or related code concepts).
+ */
+function checkAnswerRelevance(
+  question: string,
+  answer: string,
+): { relevant: boolean; reason: string } {
+  const questionTerms = question
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length > 2 && !STOP_WORDS.has(w));
+
+  if (questionTerms.length === 0) return { relevant: true, reason: '' };
+
+  const answerLower = answer.toLowerCase();
+
+  // Check how many question terms appear in the answer
+  const mentioned = questionTerms.filter(term => answerLower.includes(term));
+  const ratio = mentioned.length / questionTerms.length;
+
+  // If less than 20% of key terms from the question appear in the answer,
+  // it's likely off-topic
+  if (ratio < 0.15 && questionTerms.length >= 2) {
+    return {
+      relevant: false,
+      reason: `Your answer does not appear to address the user's question about "${questionTerms.join(', ')}". Re-read the question and provide a specific, relevant answer.`,
+    };
+  }
+
+  return { relevant: true, reason: '' };
 }
 
 /**

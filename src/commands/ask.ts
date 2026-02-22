@@ -11,6 +11,8 @@ import {
   loadProjectContext,
   buildSystemPrompt,
   enrichUserPrompt,
+  generateSearchPlan,
+  buildSynthesisReminder,
   validateAnswer,
   buildCorrectionMessage,
   formatToolCall,
@@ -47,6 +49,31 @@ async function readPromptFromStdin(): Promise<string | null> {
 }
 
 // ── Main command ──────────────────────────────────────────────────────────────
+
+/** Render the final answer (shared by tool-loop exit and synthesis). */
+async function renderFinalAnswer(
+  text: string,
+  usage: { promptTokens: number; completionTokens: number; totalTokens: number } | undefined,
+  options: AskOptions,
+  profile: { model?: string },
+  noColor: boolean,
+): Promise<void> {
+  if (options.json) {
+    printJsonResult({ response: text, usage, model: profile.model });
+  } else {
+    try {
+      const rendered = await renderMarkdown(text);
+      process.stdout.write(rendered);
+    } catch {
+      process.stdout.write(text + '\n');
+    }
+  }
+
+  if (usage && !options.json) {
+    const u = usage;
+    process.stderr.write(`\n${formatUsage(u.promptTokens, u.completionTokens, u.totalTokens, noColor)}\n`);
+  }
+}
 
 export async function runAsk(inlinePrompt: string | undefined, options: AskOptions): Promise<void> {
   try {
@@ -114,11 +141,27 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
       const noColor = options.noColor ?? false;
       const tracker = new ToolCallTracker();
 
-      // Enrich the user's prompt with search guidance
-      const enrichedPrompt = enrichUserPrompt(prompt);
+      // ── Planning phase: deep reasoning about what to search for ─────────
+      process.stderr.write(formatSeparator('Planning', noColor));
+      const projectCtxForPlan = jamContext ?? workspaceCtx;
+      const searchPlan = await generateSearchPlan(adapter, prompt, projectCtxForPlan, {
+        model: profile.model,
+        temperature: profile.temperature,
+        maxTokens: profile.maxTokens,
+      });
+
+      if (searchPlan) {
+        process.stderr.write(searchPlan + '\n');
+      } else {
+        process.stderr.write('  (planning skipped — using generic search strategy)\n');
+      }
+
+      // Enrich the user's prompt with the search plan
+      const enrichedPrompt = enrichUserPrompt(prompt, searchPlan);
       const messages: Message[] = [{ role: 'user', content: enrichedPrompt }];
 
       const MAX_TOOL_ROUNDS = 15;
+      let synthesisInjected = false;
 
       process.stderr.write(formatSeparator('Searching codebase', noColor));
 
@@ -134,8 +177,33 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
         if (!response.toolCalls || response.toolCalls.length === 0) {
           const finalText = response.content ?? '';
 
+          // ── Synthesis grounding: remind model of the original question ───
+          // If we gathered context (tool calls made) but haven't injected
+          // a synthesis reminder yet, do so now and ask for one more round.
+          if (tracker.totalCalls > 0 && !synthesisInjected && round < MAX_TOOL_ROUNDS - 2) {
+            synthesisInjected = true;
+            const synthesisOk = finalText.trim().length > 0;
+
+            // If the model already produced an answer, validate it first
+            if (synthesisOk) {
+              const validation = validateAnswer(finalText, true, prompt);
+              if (validation.valid) {
+                // Answer looks good — render it
+                process.stderr.write(formatSeparator('Answer', noColor));
+                await renderFinalAnswer(finalText, response.usage, options, profile, noColor);
+                return;
+              }
+            }
+
+            // Inject synthesis reminder and retry
+            process.stderr.write(formatRetry('Grounding answer to your question…', noColor) + '\n');
+            messages.push({ role: 'assistant', content: finalText });
+            messages.push({ role: 'user', content: buildSynthesisReminder(prompt) });
+            continue;
+          }
+
           // ── Self-validation: check if the answer looks like garbage ──
-          const validation = validateAnswer(finalText, tracker.totalCalls > 0);
+          const validation = validateAnswer(finalText, tracker.totalCalls > 0, prompt);
 
           if (!validation.valid && round < MAX_TOOL_ROUNDS - 2) {
             process.stderr.write(formatRetry('Answer quality check failed, retrying…', noColor) + '\n');
@@ -145,22 +213,7 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
           }
 
           process.stderr.write(formatSeparator('Answer', noColor));
-
-          if (options.json) {
-            printJsonResult({ response: finalText, usage: response.usage, model: profile.model });
-          } else {
-            try {
-              const rendered = await renderMarkdown(finalText);
-              process.stdout.write(rendered);
-            } catch {
-              process.stdout.write(finalText + '\n');
-            }
-          }
-
-          if (response.usage && !options.json) {
-            const u = response.usage;
-            process.stderr.write(`\n${formatUsage(u.promptTokens, u.completionTokens, u.totalTokens, noColor)}\n`);
-          }
+          await renderFinalAnswer(finalText, response.usage, options, profile, noColor);
           return;
         }
 

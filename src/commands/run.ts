@@ -10,6 +10,8 @@ import {
   loadProjectContext,
   buildSystemPrompt,
   enrichUserPrompt,
+  generateSearchPlan,
+  buildSynthesisReminder,
   validateAnswer,
   buildCorrectionMessage,
   formatToolCall,
@@ -62,8 +64,23 @@ export async function runRun(instruction: string | undefined, options: RunOption
       profile.systemPrompt ??
       buildSystemPrompt(jamContext, workspaceCtx, { mode: 'readwrite', workspaceRoot });
 
-    // Enrich the instruction with search guidance
-    const enrichedInstruction = enrichUserPrompt(instruction);
+    // ── Planning phase ────────────────────────────────────────────────────
+    process.stderr.write(formatSeparator('Planning', noColor));
+    const projectCtxForPlan = jamContext ?? workspaceCtx;
+    const searchPlan = await generateSearchPlan(adapter, instruction, projectCtxForPlan, {
+      model: profile.model,
+      temperature: profile.temperature,
+      maxTokens: profile.maxTokens,
+    });
+
+    if (searchPlan) {
+      process.stderr.write(searchPlan + '\n');
+    } else {
+      process.stderr.write('  (planning skipped — using generic strategy)\n');
+    }
+
+    // Enrich the instruction with the search plan
+    const enrichedInstruction = enrichUserPrompt(instruction, searchPlan);
 
     const messages: Message[] = [
       { role: 'user', content: enrichedInstruction },
@@ -78,6 +95,7 @@ export async function runRun(instruction: string | undefined, options: RunOption
 
     // Agentic loop
     const MAX_ITERATIONS = 15;
+    let synthesisInjected = false;
     process.stderr.write(formatSeparator('Working', noColor));
 
     for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
@@ -92,8 +110,37 @@ export async function runRun(instruction: string | undefined, options: RunOption
       if (!response.toolCalls || response.toolCalls.length === 0) {
         const finalText = response.content ?? '';
 
+        // Synthesis grounding
+        if (tracker.totalCalls > 0 && !synthesisInjected && iteration < MAX_ITERATIONS - 2) {
+          synthesisInjected = true;
+          if (finalText.trim().length > 0) {
+            const validation = validateAnswer(finalText, true, instruction);
+            if (validation.valid) {
+              // Answer is already good
+              process.stderr.write(formatSeparator('Result', noColor));
+              if (finalText) {
+                try {
+                  const rendered = await renderMarkdown(finalText);
+                  process.stdout.write(rendered);
+                } catch {
+                  process.stdout.write(finalText + '\n');
+                }
+              }
+              if (response.usage) {
+                const u = response.usage;
+                process.stderr.write(`\n${formatUsage(u.promptTokens, u.completionTokens, u.totalTokens, noColor)}\n`);
+              }
+              break;
+            }
+          }
+          process.stderr.write(formatRetry('Grounding answer to your question…', noColor) + '\n');
+          messages.push({ role: 'assistant', content: finalText });
+          messages.push({ role: 'user', content: buildSynthesisReminder(instruction) });
+          continue;
+        }
+
         // Self-validation
-        const validation = validateAnswer(finalText, tracker.totalCalls > 0);
+        const validation = validateAnswer(finalText, tracker.totalCalls > 0, instruction);
         if (!validation.valid && iteration < MAX_ITERATIONS - 2) {
           process.stderr.write(formatRetry('Answer quality check failed, retrying…', noColor) + '\n');
           messages.push({ role: 'assistant', content: finalText });
