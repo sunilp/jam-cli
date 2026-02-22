@@ -27,7 +27,7 @@
 
 Ask questions • Explain code • Review diffs • Generate patches • Run agentic tasks
 
-*All from your command line, powered by any Ollama-hosted model.*
+*All from your command line, powered by Ollama, OpenAI, Groq, or any compatible provider.*
 
 [Getting Started](#quick-start) · [Commands](#commands) · [Configuration](#configuration) · [Contributing](#contributing) · [Security](#security-policy)
 
@@ -58,7 +58,7 @@ Most AI coding tools are built around a single vendor's model, require a browser
 | 📂 | **Repo-aware** | Explain files, search code, review diffs with full workspace context |
 | 🩹 | **Patch workflow** | Generate unified diffs, validate, preview, and apply with confirmation |
 | 🤖 | **Tool-calling agent** | `jam run` gives the model access to local tools (read, search, diff, apply) |
-| 🔌 | **Pluggable providers** | Ollama by default; adapter pattern for adding any LLM |
+| 🔌 | **Pluggable providers** | Ollama, OpenAI, Groq built-in; adapter pattern for adding any LLM |
 | ⚙️ | **Layered config** | Global → repo → CLI flags; multiple named profiles |
 | 🔐 | **Secure secrets** | OS keychain via keytar, env var fallback |
 | 🐚 | **Shell completions** | Bash and Zsh |
@@ -164,6 +164,7 @@ jam ask "Hello" --profile work
 | `--profile <name>` | Use a named config profile |
 | `--no-tools` | Disable read-only tool use (file discovery) |
 | `--no-color` | Strip ANSI colors from output (global flag) |
+| `-q, --quiet` | Suppress all non-essential output (spinners, status lines, decorations) |
 
 ---
 
@@ -323,6 +324,7 @@ jam run "Read src/config.ts and identify any security issues"
 | `git_diff` | Read | Get git diff |
 | `write_file` | **Write** | Write to a file (prompts for confirmation) |
 | `apply_patch` | **Write** | Apply a unified diff (prompts for confirmation) |
+| `run_command` | **Write** | Execute a shell command (dangerous patterns blocked; prompts for confirmation) |
 
 Write tools require confirmation unless `toolPolicy` is set to `allowlist` in config.
 
@@ -463,7 +465,7 @@ Jam merges config in priority order (highest wins):
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `provider` | string | Provider name (`ollama`) |
+| `provider` | string | Provider name (`ollama`, `openai`, `groq`) |
 | `model` | string | Model ID (e.g. `llama3.2`, `codellama`) |
 | `baseUrl` | string | Provider API base URL |
 | `apiKey` | string | API key (prefer keychain or env vars) |
@@ -499,6 +501,8 @@ echo '{"defaultProfile": "fast"}' > .jamrc
 |----------|-------------|
 | `JAM_API_KEY` | API key fallback (if keytar unavailable) |
 | `JAM_BASE_URL` | Override provider base URL |
+| `OPENAI_API_KEY` | OpenAI API key (used when `provider: openai`) |
+| `GROQ_API_KEY` | Groq API key (used when `provider: groq`) |
 
 ---
 
@@ -605,9 +609,10 @@ We take security seriously. If you discover a vulnerability, please **do not** o
 
 ## Roadmap
 
-- [ ] OpenAI / Azure OpenAI provider
+- [x] OpenAI provider
+- [ ] Azure OpenAI provider
 - [ ] Anthropic Claude provider
-- [ ] Groq provider
+- [x] Groq provider
 - [ ] Plugin system for custom tools
 - [ ] Token usage tracking and budgets
 - [ ] Web UI companion
