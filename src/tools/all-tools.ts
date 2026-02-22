@@ -53,6 +53,22 @@ const WRITE_TOOL_SCHEMAS: ToolDefinition[] = [
       required: ['patch'],
     },
   },
+  {
+    name: 'run_command',
+    description:
+      'Execute a shell command and return its stdout and stderr. ' +
+      'Use for running tests, builds, linters, or other safe commands. ' +
+      'Dangerous commands (rm -rf, sudo, etc.) are blocked.',
+    parameters: {
+      type: 'object',
+      properties: {
+        command: { type: 'string', description: 'The executable to run (e.g. "npm", "git", "python")' },
+        args: { type: 'string', description: 'Space-separated arguments (e.g. "test --run")' },
+        timeout: { type: 'number', description: 'Timeout in seconds. Default is 30.' },
+      },
+      required: ['command'],
+    },
+  },
 ];
 
 /** All tool schemas for the run command (read + write). */

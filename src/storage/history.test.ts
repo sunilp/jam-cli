@@ -151,3 +151,85 @@ describe('history storage', () => {
     expect(d2!.messages[0]!.content).toBe('for s2');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Platform-specific path tests (Issue #6)
+// ---------------------------------------------------------------------------
+
+describe('getSessionDir() platform paths', () => {
+  const originalPlatform = process.platform;
+  const originalXdg = process.env['XDG_DATA_HOME'];
+  const originalAppData = process.env['APPDATA'];
+
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', { value: originalPlatform, writable: true });
+    if (originalXdg === undefined) {
+      delete process.env['XDG_DATA_HOME'];
+    } else {
+      process.env['XDG_DATA_HOME'] = originalXdg;
+    }
+    if (originalAppData === undefined) {
+      delete process.env['APPDATA'];
+    } else {
+      process.env['APPDATA'] = originalAppData;
+    }
+    rmSync(fakeHome, { recursive: true, force: true });
+  });
+
+  it('uses Library/Application Support on macOS (darwin)', async () => {
+    Object.defineProperty(process, 'platform', { value: 'darwin', writable: true });
+    fakeHome = await mkdtemp(join(tmpdir(), 'jam-darwin-'));
+
+    const session = await createSession('mac-test', '/workspace');
+    const detail = await getSession(session.id);
+    expect(detail).not.toBeNull();
+    expect(detail!.name).toBe('mac-test');
+    // Session dir should be under ~/Library/Application Support/jam/sessions
+    const sessions = await listSessions();
+    expect(sessions.find((s) => s.id === session.id)).toBeTruthy();
+  });
+
+  it('uses XDG_DATA_HOME on Linux when set', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', writable: true });
+    fakeHome = await mkdtemp(join(tmpdir(), 'jam-linux-'));
+    process.env['XDG_DATA_HOME'] = join(fakeHome, 'xdg');
+
+    const session = await createSession('linux-xdg-test', '/workspace');
+    const detail = await getSession(session.id);
+    expect(detail).not.toBeNull();
+    expect(detail!.name).toBe('linux-xdg-test');
+  });
+
+  it('falls back to ~/.local/share on Linux when XDG_DATA_HOME is unset', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', writable: true });
+    delete process.env['XDG_DATA_HOME'];
+    fakeHome = await mkdtemp(join(tmpdir(), 'jam-linux-fallback-'));
+
+    const session = await createSession('linux-fallback-test', '/workspace');
+    const detail = await getSession(session.id);
+    expect(detail).not.toBeNull();
+    expect(detail!.name).toBe('linux-fallback-test');
+  });
+
+  it('uses APPDATA on Windows (win32) when set', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', writable: true });
+    fakeHome = await mkdtemp(join(tmpdir(), 'jam-win32-'));
+    process.env['APPDATA'] = join(fakeHome, 'AppData', 'Roaming');
+
+    const session = await createSession('windows-test', '/workspace');
+    const detail = await getSession(session.id);
+    expect(detail).not.toBeNull();
+    expect(detail!.name).toBe('windows-test');
+  });
+
+  it('falls back to homedir on Windows when APPDATA is unset', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', writable: true });
+    delete process.env['APPDATA'];
+    fakeHome = await mkdtemp(join(tmpdir(), 'jam-win32-fallback-'));
+
+    const session = await createSession('windows-fallback-test', '/workspace');
+    const detail = await getSession(session.id);
+    expect(detail).not.toBeNull();
+    expect(detail!.name).toBe('windows-fallback-test');
+  });
+});

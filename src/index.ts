@@ -22,7 +22,8 @@ program
   .option('--model <name>', 'override the model')
   .option('--base-url <url>', 'override the provider base URL')
   .option('--no-color', 'disable color output')
-  .option('--verbose', 'enable debug logging');
+  .option('--verbose', 'enable debug logging')
+  .option('-q, --quiet', 'suppress non-essential output (spinners, status lines, decorations)');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function globalOpts() {
@@ -33,6 +34,7 @@ function globalOpts() {
     baseUrl?: string;
     color?: boolean;
     verbose?: boolean;
+    quiet?: boolean;
   }>();
 }
 
@@ -53,6 +55,7 @@ program
       model: g.model,
       baseUrl: g.baseUrl,
       noColor: g.color === false,
+      quiet: g.quiet,
       file: cmdOpts['file'] as string | undefined,
       json: cmdOpts['json'] as boolean | undefined,
       system: cmdOpts['system'] as string | undefined,

@@ -35,6 +35,7 @@ export interface AskOptions extends CliOverrides {
   file?: string;
   json?: boolean;
   noColor?: boolean;
+  quiet?: boolean;
   system?: string;
   /** Enable read-only tool use so the model can discover and read files.
    *  Defaults to true when stdout is a TTY and the provider supports chatWithTools. */
@@ -62,6 +63,7 @@ async function renderFinalAnswer(
   options: AskOptions,
   profile: { model?: string },
   noColor: boolean,
+  stderrLog: (msg: string) => void,
 ): Promise<void> {
   if (options.json) {
     printJsonResult({ response: text, usage, model: profile.model });
@@ -76,7 +78,7 @@ async function renderFinalAnswer(
 
   if (usage && !options.json) {
     const u = usage;
-    process.stderr.write(`\n${formatUsage(u.promptTokens, u.completionTokens, u.totalTokens, noColor)}\n`);
+    stderrLog(`\n${formatUsage(u.promptTokens, u.completionTokens, u.totalTokens, noColor)}\n`);
   }
 }
 
@@ -112,6 +114,9 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
       const chalk = await import('chalk');
       chalk.default.level = 0;
     }
+
+    // Quiet mode: suppress all non-essential stderr output
+    const stderrLog = options.quiet ? (_msg: string) => {} : (msg: string) => process.stderr.write(msg);
 
     // Load config with CLI overrides
     const cliOverrides: CliOverrides = {
@@ -164,7 +169,7 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
       } catch { /* non-fatal */ }
 
       // ── Planning phase: deep reasoning about what to search for ─────────
-      process.stderr.write(formatSeparator('Planning', noColor));
+      stderrLog(formatSeparator('Planning', noColor));
       const projectCtxForPlan = [jamContext ?? workspaceCtx, symbolHint, pastContext].filter(Boolean).join('\n\n');
       const searchPlan = await generateSearchPlan(adapter, prompt, projectCtxForPlan, {
         model: profile.model,
@@ -173,9 +178,9 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
       });
 
       if (searchPlan) {
-        process.stderr.write(formatPlanBlock(searchPlan, noColor) + '\n');
+        stderrLog(formatPlanBlock(searchPlan, noColor) + '\n');
       } else {
-        process.stderr.write(formatInternalStatus('planning skipped — using generic search strategy', noColor) + '\n');
+        stderrLog(formatInternalStatus('planning skipped — using generic search strategy', noColor) + '\n');
       }
 
       // Enrich the user's prompt with the search plan
@@ -185,12 +190,12 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
       const MAX_TOOL_ROUNDS = 15;
       let synthesisInjected = false;
 
-      process.stderr.write(formatSeparator('Searching codebase', noColor));
+      stderrLog(formatSeparator('Searching codebase', noColor));
 
       for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
         // ── Context window management: compact if approaching limit ───────
         if (memory.shouldCompact(messages)) {
-          process.stderr.write(formatInternalStatus('Compacting context…', noColor) + '\n');
+          stderrLog(formatInternalStatus('Compacting context…', noColor) + '\n');
           messages = await memory.compact(messages);
         }
 
@@ -211,25 +216,25 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
 
             // If the model already produced an answer, run critic evaluation
             if (finalText.trim().length > 0) {
-              process.stderr.write(formatInternalStatus('Evaluating answer quality…', noColor) + '\n');
+              stderrLog(formatInternalStatus('Evaluating answer quality…', noColor) + '\n');
               const verdict = await criticEvaluate(adapter, prompt, finalText, { model: profile.model });
               if (verdict.pass) {
-                process.stderr.write(formatSeparator('Answer', noColor));
-                await renderFinalAnswer(finalText, response.usage, options, profile, noColor);
+                stderrLog(formatSeparator('Answer', noColor));
+                await renderFinalAnswer(finalText, response.usage, options, profile, noColor, stderrLog);
                 // Auto-update JAM.md with usage patterns
                 const log = memory.getAccessLog();
                 updateContextWithUsage(workspaceRoot, log.readFiles, log.searchQueries).catch(() => {});
                 return;
               }
               // Critic rejected — use its specific feedback
-              process.stderr.write(formatInternalStatus(`Critic: ${verdict.reason}`, noColor) + '\n');
+              stderrLog(formatInternalStatus(`Critic: ${verdict.reason}`, noColor) + '\n');
               messages.push({ role: 'assistant', content: finalText });
               messages.push({ role: 'user', content: buildCriticCorrection(verdict, prompt) });
               continue;
             }
 
             // No answer yet — inject synthesis reminder
-            process.stderr.write(formatInternalStatus('Grounding answer to your question…', noColor) + '\n');
+            stderrLog(formatInternalStatus('Grounding answer to your question…', noColor) + '\n');
             messages.push({ role: 'assistant', content: finalText });
             messages.push({ role: 'user', content: buildSynthesisReminder(prompt) });
             continue;
@@ -239,15 +244,15 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
           if (tracker.totalCalls > 0 && finalText.trim().length > 30 && round < MAX_TOOL_ROUNDS - 2) {
             const verdict = await criticEvaluate(adapter, prompt, finalText, { model: profile.model });
             if (!verdict.pass) {
-              process.stderr.write(formatInternalStatus(`Critic: ${verdict.reason}`, noColor) + '\n');
+              stderrLog(formatInternalStatus(`Critic: ${verdict.reason}`, noColor) + '\n');
               messages.push({ role: 'assistant', content: finalText });
               messages.push({ role: 'user', content: buildCriticCorrection(verdict, prompt) });
               continue;
             }
           }
 
-          process.stderr.write(formatSeparator('Answer', noColor));
-          await renderFinalAnswer(finalText, response.usage, options, profile, noColor);
+          stderrLog(formatSeparator('Answer', noColor));
+          await renderFinalAnswer(finalText, response.usage, options, profile, noColor, stderrLog);
           // Auto-update JAM.md with usage patterns
           const log = memory.getAccessLog();
           updateContextWithUsage(workspaceRoot, log.readFiles, log.searchQueries).catch(() => {});
@@ -260,7 +265,7 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
         for (const tc of response.toolCalls) {
           // Duplicate detection — skip and inject guidance
           if (tracker.isDuplicate(tc.name, tc.arguments)) {
-            process.stderr.write(formatDuplicateSkip(tc.name, noColor) + '\n');
+            stderrLog(formatDuplicateSkip(tc.name, noColor) + '\n');
             messages.push({
               role: 'user',
               content: `[Tool result: ${tc.name}]\nYou already made this exact call. The result was the same as before. Try a DIFFERENT search query or tool.`,
@@ -272,14 +277,14 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
           // Check cache first
           const cached = cache.get(tc.name, tc.arguments);
           if (cached !== null) {
-            process.stderr.write(formatToolCall(tc.name, tc.arguments, noColor) + ' (cached)\n');
+            stderrLog(formatToolCall(tc.name, tc.arguments, noColor) + ' (cached)\n');
             const capped = memory.processToolResult(tc.name, tc.arguments, cached);
             messages.push({ role: 'user', content: `[Tool result: ${tc.name}]\n${capped}` });
             tracker.record(tc.name, tc.arguments, false);
             continue;
           }
 
-          process.stderr.write(formatToolCall(tc.name, tc.arguments, noColor) + '\n');
+          stderrLog(formatToolCall(tc.name, tc.arguments, noColor) + '\n');
 
           let toolOutput: string;
           let wasError = false;
@@ -296,7 +301,7 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
           // Cap the output before injecting into messages
           const cappedOutput = memory.processToolResult(tc.name, tc.arguments, toolOutput);
 
-          process.stderr.write(formatToolResult(cappedOutput, noColor) + '\n');
+          stderrLog(formatToolResult(cappedOutput, noColor) + '\n');
           tracker.record(tc.name, tc.arguments, wasError);
 
           messages.push({ role: 'user', content: `[Tool result: ${tc.name}]\n${cappedOutput}` });
@@ -304,20 +309,20 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
 
         // ── Scratchpad: periodic working memory checkpoint ─────────────────
         if (memory.shouldScratchpad(round)) {
-          process.stderr.write(formatInternalStatus('Working memory checkpoint…', noColor) + '\n');
+          stderrLog(formatInternalStatus('Working memory checkpoint…', noColor) + '\n');
           messages.push(memory.scratchpadPrompt());
         }
 
         // ── Inject correction hints if stuck ──────────────────────────────────
         const hint = tracker.getCorrectionHint();
         if (hint) {
-          process.stderr.write(formatHintInjection(noColor) + '\n');
+          stderrLog(formatHintInjection(noColor) + '\n');
           messages.push({ role: 'user', content: hint });
         }
       }
 
       // Exceeded round limit — fall through to streaming
-      process.stderr.write(formatSeparator('Max tool rounds reached, generating answer', noColor));
+      stderrLog(formatSeparator('Max tool rounds reached, generating answer', noColor));
     }
 
     // ── Standard streaming response ───────────────────────────────────────────

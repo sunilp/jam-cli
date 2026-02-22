@@ -57,7 +57,7 @@ export const applyPatchTool: ToolDefinition = {
       // Apply the patch
       let stdout: string;
       try {
-        stdout = await runCommand('git', ['apply', tempFile], ctx.workspaceRoot);
+        ({ stdout } = await runCommand('git', ['apply', tempFile], ctx.workspaceRoot));
       } catch (err: unknown) {
         const detail = err instanceof Error ? err.message : String(err);
         throw new JamError(
