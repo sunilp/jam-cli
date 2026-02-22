@@ -32,6 +32,7 @@ import type { Message } from '../providers/base.js';
 
 export interface RunOptions extends CliOverrides {
   noColor?: boolean;
+  quiet?: boolean;
 }
 
 async function confirmToolCall(
@@ -54,13 +55,14 @@ export async function runRun(instruction: string | undefined, options: RunOption
 
   try {
     const noColor = options.noColor ?? false;
+    const stderrLog = options.quiet ? (_msg: string) => {} : (msg: string) => process.stderr.write(msg);
     const workspaceRoot = await getWorkspaceRoot();
     const config = await loadConfig(process.cwd(), options);
     const profile = getActiveProfile(config);
     const adapter = await createProvider(profile);
 
-    process.stderr.write(`Starting task: ${instruction}\n`);
-    process.stderr.write(`Provider: ${profile.provider}, Model: ${profile.model ?? 'default'}\n`);
+    stderrLog(`Starting task: ${instruction}\n`);
+    stderrLog(`Provider: ${profile.provider}, Model: ${profile.model ?? 'default'}\n`);
 
     // Load project context
     const { jamContext, workspaceCtx } = await loadProjectContext(workspaceRoot);
@@ -87,7 +89,7 @@ export async function runRun(instruction: string | undefined, options: RunOption
     } catch { /* non-fatal */ }
 
     // ── Planning phase ────────────────────────────────────────────────────
-    process.stderr.write(formatSeparator('Planning', noColor));
+    stderrLog(formatSeparator('Planning', noColor));
     const projectCtxForPlan = [jamContext ?? workspaceCtx, symbolHint, pastContext].filter(Boolean).join('\n\n');
     const searchPlan = await generateSearchPlan(adapter, instruction, projectCtxForPlan, {
       model: profile.model,
@@ -96,9 +98,9 @@ export async function runRun(instruction: string | undefined, options: RunOption
     });
 
     if (searchPlan) {
-      process.stderr.write(formatPlanBlock(searchPlan, noColor) + '\n');
+      stderrLog(formatPlanBlock(searchPlan, noColor) + '\n');
     } else {
-      process.stderr.write(formatInternalStatus('planning skipped — using generic strategy', noColor) + '\n');
+      stderrLog(formatInternalStatus('planning skipped — using generic strategy', noColor) + '\n');
     }
 
     // Enrich the instruction with the search plan
@@ -117,7 +119,7 @@ export async function runRun(instruction: string | undefined, options: RunOption
 
     /** Render final markdown result + usage stats. */
     const renderResult = async (text: string, usage?: { promptTokens: number; completionTokens: number; totalTokens: number }) => {
-      process.stderr.write(formatSeparator('Result', noColor));
+      stderrLog(formatSeparator('Result', noColor));
       if (text) {
         try {
           const rendered = await renderMarkdown(text);
@@ -127,7 +129,7 @@ export async function runRun(instruction: string | undefined, options: RunOption
         }
       }
       if (usage) {
-        process.stderr.write(`\n${formatUsage(usage.promptTokens, usage.completionTokens, usage.totalTokens, noColor)}\n`);
+        stderrLog(`\n${formatUsage(usage.promptTokens, usage.completionTokens, usage.totalTokens, noColor)}\n`);
       }
       const log = memory.getAccessLog();
       updateContextWithUsage(workspaceRoot, log.readFiles, log.searchQueries).catch(() => {});
@@ -136,12 +138,12 @@ export async function runRun(instruction: string | undefined, options: RunOption
     // Agentic loop
     const MAX_ITERATIONS = 15;
     let synthesisInjected = false;
-    process.stderr.write(formatSeparator('Working', noColor));
+    stderrLog(formatSeparator('Working', noColor));
 
     for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
       // Context window management
       if (memory.shouldCompact(messages)) {
-        process.stderr.write(formatInternalStatus('Compacting context…', noColor) + '\n');
+        stderrLog(formatInternalStatus('Compacting context…', noColor) + '\n');
         messages = await memory.compact(messages);
       }
 
@@ -160,18 +162,18 @@ export async function runRun(instruction: string | undefined, options: RunOption
         if (tracker.totalCalls > 0 && !synthesisInjected && iteration < MAX_ITERATIONS - 2) {
           synthesisInjected = true;
           if (finalText.trim().length > 0) {
-            process.stderr.write(formatInternalStatus('Evaluating answer quality…', noColor) + '\n');
+            stderrLog(formatInternalStatus('Evaluating answer quality…', noColor) + '\n');
             const verdict = await criticEvaluate(adapter, instruction, finalText, { model: profile.model });
             if (verdict.pass) {
               await renderResult(finalText, response.usage);
               break;
             }
-            process.stderr.write(formatInternalStatus(`Critic: ${verdict.reason}`, noColor) + '\n');
+            stderrLog(formatInternalStatus(`Critic: ${verdict.reason}`, noColor) + '\n');
             messages.push({ role: 'assistant', content: finalText });
             messages.push({ role: 'user', content: buildCriticCorrection(verdict, instruction) });
             continue;
           }
-          process.stderr.write(formatInternalStatus('Grounding answer to your question…', noColor) + '\n');
+          stderrLog(formatInternalStatus('Grounding answer to your question…', noColor) + '\n');
           messages.push({ role: 'assistant', content: finalText });
           messages.push({ role: 'user', content: buildSynthesisReminder(instruction) });
           continue;
@@ -181,7 +183,7 @@ export async function runRun(instruction: string | undefined, options: RunOption
         if (tracker.totalCalls > 0 && finalText.trim().length > 30 && iteration < MAX_ITERATIONS - 2) {
           const verdict = await criticEvaluate(adapter, instruction, finalText, { model: profile.model });
           if (!verdict.pass) {
-            process.stderr.write(formatInternalStatus(`Critic: ${verdict.reason}`, noColor) + '\n');
+            stderrLog(formatInternalStatus(`Critic: ${verdict.reason}`, noColor) + '\n');
             messages.push({ role: 'assistant', content: finalText });
             messages.push({ role: 'user', content: buildCriticCorrection(verdict, instruction) });
             continue;
@@ -197,14 +199,14 @@ export async function runRun(instruction: string | undefined, options: RunOption
 
       // Print any intermediate text
       if (response.content) {
-        process.stderr.write(`\n${response.content}\n`);
+        stderrLog(`\n${response.content}\n`);
       }
 
       // Execute tool calls
       for (const tc of response.toolCalls) {
         // Duplicate detection
         if (tracker.isDuplicate(tc.name, tc.arguments)) {
-          process.stderr.write(formatDuplicateSkip(tc.name, noColor) + '\n');
+          stderrLog(formatDuplicateSkip(tc.name, noColor) + '\n');
           messages.push({
             role: 'user',
             content: `[Tool result: ${tc.name}]\nYou already made this exact call. Try a DIFFERENT approach.`,
@@ -219,7 +221,7 @@ export async function runRun(instruction: string | undefined, options: RunOption
         if (isReadonly) {
           const cached = cache.get(tc.name, tc.arguments);
           if (cached !== null) {
-            process.stderr.write(formatToolCall(tc.name, tc.arguments, noColor) + ' (cached)\n');
+            stderrLog(formatToolCall(tc.name, tc.arguments, noColor) + ' (cached)\n');
             const capped = memory.processToolResult(tc.name, tc.arguments, cached);
             messages.push({ role: 'user', content: `[Tool result: ${tc.name}]\n${capped}` });
             tracker.record(tc.name, tc.arguments, false);
@@ -227,7 +229,7 @@ export async function runRun(instruction: string | undefined, options: RunOption
           }
         }
 
-        process.stderr.write(formatToolCall(tc.name, tc.arguments, noColor) + '\n');
+        stderrLog(formatToolCall(tc.name, tc.arguments, noColor) + '\n');
 
         // Confirm write tools based on policy
         if (!isReadonly) {
@@ -268,26 +270,26 @@ export async function runRun(instruction: string | undefined, options: RunOption
         // Cap tool output before injecting into messages
         const cappedOutput = memory.processToolResult(tc.name, tc.arguments, toolOutput);
 
-        process.stderr.write(formatToolResult(cappedOutput, noColor) + '\n');
+        stderrLog(formatToolResult(cappedOutput, noColor) + '\n');
         tracker.record(tc.name, tc.arguments, wasError);
         messages.push({ role: 'user', content: `[Tool result: ${tc.name}]\n${cappedOutput}` });
       }
 
       // Scratchpad checkpoint
       if (memory.shouldScratchpad(iteration)) {
-        process.stderr.write(formatInternalStatus('Working memory checkpoint…', noColor) + '\n');
+        stderrLog(formatInternalStatus('Working memory checkpoint…', noColor) + '\n');
         messages.push(memory.scratchpadPrompt());
       }
 
       // Inject correction hints if stuck
       const hint = tracker.getCorrectionHint();
       if (hint) {
-        process.stderr.write(formatHintInjection(noColor) + '\n');
+        stderrLog(formatHintInjection(noColor) + '\n');
         messages.push({ role: 'user', content: hint });
       }
     }
 
-    process.stderr.write('\nTask complete.\n');
+    stderrLog('\nTask complete.\n');
   } catch (err) {
     const jamErr = JamError.fromUnknown(err);
     await printError(jamErr.message);

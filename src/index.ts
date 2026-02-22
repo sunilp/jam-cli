@@ -95,6 +95,7 @@ program
       model: g.model,
       baseUrl: g.baseUrl,
       noColor: g.color === false,
+      quiet: g.quiet,
     });
   });
 
