@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Log redaction for sensitive patterns
 - Markdown rendering in terminal (marked + marked-terminal)
 
-## [0.1.0] - 2025
+## [0.1.0] - 2026
 
 ### Added
 - Initial project setup

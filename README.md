@@ -610,7 +610,7 @@ Built with these excellent open source projects:
 
 ## License
 
-MIT License — Copyright (c) 2025-present **Sunil Prakash**. All rights reserved.
+MIT License — Copyright (c) 2026-present **Sunil Prakash**. All rights reserved.
 
 See [LICENSE](LICENSE) for the full license text.
 

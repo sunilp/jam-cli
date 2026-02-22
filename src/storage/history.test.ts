@@ -11,9 +11,9 @@ import { rmSync } from 'node:fs';
 let fakeHome = '';
 
 vi.mock('node:os', async (importOriginal) => {
-  const original = await importOriginal<typeof import('node:os')>();
+  const original = await importOriginal();
   return {
-    ...original,
+    ...(original as object),
     homedir: () => fakeHome,
   };
 });
