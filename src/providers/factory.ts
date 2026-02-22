@@ -13,8 +13,26 @@ export async function createProvider(profile: Profile): Promise<ProviderAdapter>
     });
   }
 
+  if (provider === 'openai') {
+    const { OpenAIAdapter } = await import('./openai.js');
+    return new OpenAIAdapter({
+      baseUrl: profile.baseUrl,
+      model: profile.model,
+      apiKey: profile.apiKey,
+    });
+  }
+
+  if (provider === 'groq') {
+    const { GroqAdapter } = await import('./groq.js');
+    return new GroqAdapter({
+      baseUrl: profile.baseUrl,
+      model: profile.model,
+      apiKey: profile.apiKey,
+    });
+  }
+
   throw new JamError(
-    `Unknown provider: "${provider}". Supported providers: ollama`,
+    `Unknown provider: "${provider}". Supported providers: ollama, openai, groq`,
     'CONFIG_INVALID'
   );
 }

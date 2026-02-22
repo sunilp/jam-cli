@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { rmSync } from 'node:fs';
@@ -149,5 +149,81 @@ describe('history storage', () => {
 
     expect(d1!.messages[0]!.content).toBe('for s1');
     expect(d2!.messages[0]!.content).toBe('for s2');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Platform-specific path tests (Issue #6)
+// ---------------------------------------------------------------------------
+
+describe('getSessionDir() platform paths', () => {
+  const originalPlatform = process.platform;
+  const originalXdg = process.env['XDG_DATA_HOME'];
+  const originalAppData = process.env['APPDATA'];
+
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', { value: originalPlatform, writable: true });
+    if (originalXdg === undefined) {
+      delete process.env['XDG_DATA_HOME'];
+    } else {
+      process.env['XDG_DATA_HOME'] = originalXdg;
+    }
+    if (originalAppData === undefined) {
+      delete process.env['APPDATA'];
+    } else {
+      process.env['APPDATA'] = originalAppData;
+    }
+    rmSync(fakeHome, { recursive: true, force: true });
+  });
+
+  it('uses Library/Application Support on macOS (darwin)', async () => {
+    Object.defineProperty(process, 'platform', { value: 'darwin', writable: true });
+    fakeHome = await mkdtemp(join(tmpdir(), 'jam-darwin-'));
+
+    const session = await createSession('mac-test', '/workspace');
+    const expectedPath = join(fakeHome, 'Library', 'Application Support', 'jam', 'sessions', `${session.id}.json`);
+    await expect(access(expectedPath)).resolves.toBeUndefined();
+  });
+
+  it('uses XDG_DATA_HOME on Linux when set', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', writable: true });
+    fakeHome = await mkdtemp(join(tmpdir(), 'jam-linux-'));
+    const xdgDir = join(fakeHome, 'xdg');
+    process.env['XDG_DATA_HOME'] = xdgDir;
+
+    const session = await createSession('linux-xdg-test', '/workspace');
+    const expectedPath = join(xdgDir, 'jam', 'sessions', `${session.id}.json`);
+    await expect(access(expectedPath)).resolves.toBeUndefined();
+  });
+
+  it('falls back to ~/.local/share on Linux when XDG_DATA_HOME is unset', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', writable: true });
+    delete process.env['XDG_DATA_HOME'];
+    fakeHome = await mkdtemp(join(tmpdir(), 'jam-linux-fallback-'));
+
+    const session = await createSession('linux-fallback-test', '/workspace');
+    const expectedPath = join(fakeHome, '.local', 'share', 'jam', 'sessions', `${session.id}.json`);
+    await expect(access(expectedPath)).resolves.toBeUndefined();
+  });
+
+  it('uses APPDATA on Windows (win32) when set', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', writable: true });
+    fakeHome = await mkdtemp(join(tmpdir(), 'jam-win32-'));
+    const appDataDir = join(fakeHome, 'AppData', 'Roaming');
+    process.env['APPDATA'] = appDataDir;
+
+    const session = await createSession('windows-test', '/workspace');
+    const expectedPath = join(appDataDir, 'jam', 'sessions', `${session.id}.json`);
+    await expect(access(expectedPath)).resolves.toBeUndefined();
+  });
+
+  it('falls back to homedir on Windows when APPDATA is unset', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', writable: true });
+    delete process.env['APPDATA'];
+    fakeHome = await mkdtemp(join(tmpdir(), 'jam-win32-fallback-'));
+
+    const session = await createSession('windows-fallback-test', '/workspace');
+    const expectedPath = join(fakeHome, 'jam', 'sessions', `${session.id}.json`);
+    await expect(access(expectedPath)).resolves.toBeUndefined();
   });
 });

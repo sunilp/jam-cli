@@ -10,6 +10,7 @@ import { gitDiffTool } from './git_diff.js';
 import { gitStatusTool } from './git_status.js';
 import { applyPatchTool } from './apply_patch.js';
 import { writeFileTool } from './write_file.js';
+import { runCommandTool } from './run_command.js';
 
 export class ToolRegistry {
   private readonly tools = new Map<string, ToolDefinition>();
@@ -100,5 +101,6 @@ export function createDefaultRegistry(): ToolRegistry {
   registry.register(gitStatusTool);
   registry.register(applyPatchTool);
   registry.register(writeFileTool);
+  registry.register(runCommandTool);
   return registry;
 }

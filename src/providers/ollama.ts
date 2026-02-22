@@ -58,8 +58,15 @@ export class OllamaAdapter implements ProviderAdapter {
         signal: AbortSignal.timeout(5000),
       });
     } catch (err) {
+      const cause = err as NodeJS.ErrnoException;
+      const isConnRefused = cause?.code === 'ECONNREFUSED' || cause?.code === 'ECONNRESET';
       throw new JamError(
-        `Cannot reach Ollama at ${this.baseUrl}. Start Ollama with: ollama serve`,
+        isConnRefused
+          ? `Ollama is not running at ${this.baseUrl}. Start it with: ollama serve\n` +
+            `If Ollama is not installed, visit: https://ollama.com\n` +
+            `Run \`jam doctor\` for full diagnostics.`
+          : `Cannot reach Ollama at ${this.baseUrl}. Start it with: ollama serve\n` +
+            `Run \`jam doctor\` for full diagnostics.`,
         'PROVIDER_UNAVAILABLE',
         { retryable: false, cause: err }
       );
@@ -67,7 +74,8 @@ export class OllamaAdapter implements ProviderAdapter {
 
     if (!response.ok) {
       throw new JamError(
-        `Ollama returned HTTP ${response.status}. Is Ollama running at ${this.baseUrl}?`,
+        `Ollama returned HTTP ${response.status}. Is Ollama running at ${this.baseUrl}?\n` +
+          `Run \`jam doctor\` for full diagnostics.`,
         'PROVIDER_UNAVAILABLE',
         { retryable: false }
       );
@@ -84,15 +92,23 @@ export class OllamaAdapter implements ProviderAdapter {
       });
       if (!response.ok) {
         throw new JamError(
-          `Ollama returned HTTP ${response.status}. Is Ollama running at ${this.baseUrl}?`,
+          `Ollama returned HTTP ${response.status}. Is Ollama running at ${this.baseUrl}?\n` +
+            `Run \`jam doctor\` for full diagnostics.`,
           'PROVIDER_UNAVAILABLE',
           { retryable: false }
         );
       }
     } catch (err) {
       if (JamError.isJamError(err)) throw err;
+      const cause = err as NodeJS.ErrnoException;
+      const isConnRefused = cause?.code === 'ECONNREFUSED' || cause?.code === 'ECONNRESET';
       throw new JamError(
-        `Cannot reach Ollama at ${this.baseUrl}. Start Ollama with: ollama serve`,
+        isConnRefused
+          ? `Ollama is not running at ${this.baseUrl}. Start it with: ollama serve\n` +
+            `If Ollama is not installed, visit: https://ollama.com\n` +
+            `Run \`jam doctor\` for full diagnostics.`
+          : `Cannot reach Ollama at ${this.baseUrl}. Start it with: ollama serve\n` +
+            `Run \`jam doctor\` for full diagnostics.`,
         'PROVIDER_UNAVAILABLE',
         { retryable: false, cause: err }
       );

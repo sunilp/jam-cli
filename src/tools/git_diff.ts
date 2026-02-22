@@ -37,7 +37,7 @@ export const gitDiffTool: ToolDefinition = {
 
     let stdout: string;
     try {
-      stdout = await runCommand('git', gitArgs, ctx.workspaceRoot);
+      ({ stdout } = await runCommand('git', gitArgs, ctx.workspaceRoot));
     } catch (err: unknown) {
       throw new JamError(
         'git diff failed. Is this a git repository?',

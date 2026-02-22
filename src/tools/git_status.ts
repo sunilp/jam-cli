@@ -15,7 +15,7 @@ export const gitStatusTool: ToolDefinition = {
   async execute(_args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     let stdout: string;
     try {
-      stdout = await runCommand('git', ['status', '--short'], ctx.workspaceRoot);
+      ({ stdout } = await runCommand('git', ['status', '--short'], ctx.workspaceRoot));
     } catch (err: unknown) {
       throw new JamError(
         'git status failed. Is this a git repository?',
