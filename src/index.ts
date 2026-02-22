@@ -157,6 +157,27 @@ program
     });
   });
 
+// ── review ────────────────────────────────────────────────────────────────────
+program
+  .command('review')
+  .description('Review a branch or PR with AI')
+  .option('--base <ref>', 'base branch or ref to diff against (default: main)')
+  .option('--pr <number>', 'review a specific PR number (requires GitHub CLI)')
+  .option('--json', 'output response as JSON')
+  .action(async (cmdOpts: Record<string, unknown>) => {
+    const g = globalOpts();
+    const { runReview } = await import('./commands/review.js');
+    await runReview({
+      profile: g.profile,
+      provider: g.provider,
+      model: g.model,
+      baseUrl: g.baseUrl,
+      base: cmdOpts['base'] as string | undefined,
+      pr: cmdOpts['pr'] !== undefined ? parseInt(String(cmdOpts['pr']), 10) : undefined,
+      json: cmdOpts['json'] as boolean | undefined,
+    });
+  });
+
 // ── commit ────────────────────────────────────────────────────────────────────
 program
   .command('commit')
