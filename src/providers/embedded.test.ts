@@ -38,8 +38,9 @@ vi.mock('node-llama-cpp', () => ({
 }));
 
 // Mock fs to pretend model files exist
-vi.mock('node:fs', async () => {
-  const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+vi.mock('node:fs', async (importOriginal) => {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-imports
+  const actual = await importOriginal<typeof import('node:fs')>();
   return {
     ...actual,
     existsSync: vi.fn().mockReturnValue(true),

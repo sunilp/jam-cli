@@ -28,7 +28,6 @@ const MODELS_DIR = join(homedir(), '.jam', 'models');
  */
 const DEFAULT_HF_REPO = 'HuggingFaceTB/SmolLM2-360M-Instruct-GGUF';
 const DEFAULT_MODEL_FILENAME = 'smollm2-360m-instruct-q4_k_m.gguf';
-const DEFAULT_MODEL_LABEL = 'SmolLM2-360M-Instruct-Q4_K_M';
 
 /**
  * A curated list of known models users can request by short alias.
@@ -93,6 +92,38 @@ function resolveModel(model?: string): { repo: string; file: string } | { localP
 
 // ── Adapter ──────────────────────────────────────────────────────────────────
 
+/**
+ * Minimal type definitions for the subset of node-llama-cpp API we use.
+ * These let us avoid `any` while keeping node-llama-cpp a lazy dynamic import.
+ */
+interface LlamaInstance {
+  loadModel(opts: { modelPath: string }): Promise<LlamaModel>;
+}
+
+interface LlamaModel {
+  createContext(): Promise<LlamaContext>;
+}
+
+interface LlamaContext {
+  getSequence(): unknown;
+  dispose(): void;
+}
+
+interface LlamaChatSessionInstance {
+  prompt(text: string, opts?: { maxTokens?: number; temperature?: number; onTextChunk?: undefined }): Promise<string>;
+}
+
+interface NodeLlamaCppModule {
+  getLlama(): Promise<LlamaInstance>;
+  downloadModel(opts: {
+    url: string;
+    dirPath: string;
+    fileName: string;
+    onProgress?: (progress: { downloaded: number; total: number }) => void;
+  }): Promise<void>;
+  LlamaChatSession: new (opts: { contextSequence: unknown }) => LlamaChatSessionInstance;
+}
+
 export class EmbeddedAdapter implements ProviderAdapter {
   readonly info: ProviderInfo = {
     name: 'embedded (experimental)',
@@ -101,8 +132,8 @@ export class EmbeddedAdapter implements ProviderAdapter {
 
   private readonly modelSpec: string | undefined;
   // Lazy-loaded resources
-  private _llama: unknown = null;
-  private _model: unknown = null;
+  private _llama: LlamaInstance | null = null;
+  private _model: LlamaModel | null = null;
 
   constructor(options: { model?: string } = {}) {
     this.modelSpec = options.model;
@@ -114,14 +145,14 @@ export class EmbeddedAdapter implements ProviderAdapter {
    * Lazily load node-llama-cpp, download the model if needed, and warm up.
    * All heavy work happens here so the constructor stays synchronous.
    */
-  private async boot(): Promise<{ llama: any; model: any }> {
+  private async boot(): Promise<{ llama: LlamaInstance; model: LlamaModel }> {
     if (this._llama && this._model) {
       return { llama: this._llama, model: this._model };
     }
 
-    let nlc: any;
+    let nlc: NodeLlamaCppModule;
     try {
-      nlc = await import('node-llama-cpp');
+      nlc = await import('node-llama-cpp') as unknown as NodeLlamaCppModule;
     } catch {
       throw new JamError(
         'The "embedded" provider requires the `node-llama-cpp` package.\n' +
@@ -235,9 +266,9 @@ export class EmbeddedAdapter implements ProviderAdapter {
     const { model } = await this.boot();
 
     // node-llama-cpp v3 API
-    const nlc = await import('node-llama-cpp');
+    const nlc = await import('node-llama-cpp') as unknown as NodeLlamaCppModule;
     const context = await model.createContext();
-    const session = new nlc.LlamaChatSession({ contextSequence: context.getSequence() });
+    const session: LlamaChatSessionInstance = new nlc.LlamaChatSession({ contextSequence: context.getSequence() });
 
     // Build prompt from messages
     const promptParts: string[] = [];
@@ -298,10 +329,10 @@ export class EmbeddedAdapter implements ProviderAdapter {
     options: Pick<CompletionRequest, 'model' | 'temperature' | 'maxTokens' | 'systemPrompt'> = {}
   ): Promise<ChatWithToolsResponse> {
     const { model } = await this.boot();
-    const nlc = await import('node-llama-cpp');
+    const nlc = await import('node-llama-cpp') as unknown as NodeLlamaCppModule;
 
     const context = await model.createContext();
-    const session = new nlc.LlamaChatSession({ contextSequence: context.getSequence() });
+    const session: LlamaChatSessionInstance = new nlc.LlamaChatSession({ contextSequence: context.getSequence() });
 
     // Build prompt that describes available tools (small models won't do
     // native function calling, so we describe them in the system prompt).
