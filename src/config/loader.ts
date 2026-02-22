@@ -1,6 +1,7 @@
 import { cosmiconfig } from 'cosmiconfig';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { existsSync } from 'node:fs';
 import { JamConfigSchema } from './schema.js';
 import { CONFIG_DEFAULTS } from './defaults.js';
 import type { JamConfig, CliOverrides, Profile } from './schema.js';
@@ -63,6 +64,9 @@ async function loadFile(searchFrom: string): Promise<Partial<JamConfig>> {
 
 async function loadUserConfig(): Promise<Partial<JamConfig>> {
   const userConfigDir = join(homedir(), '.config', MODULE_NAME);
+
+  if (!existsSync(userConfigDir)) return {};
+
   const explorer = cosmiconfig(MODULE_NAME, {
     searchPlaces: ['config.json', 'config.yaml', 'config.yml'],
     stopDir: userConfigDir,
