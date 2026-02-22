@@ -162,7 +162,8 @@ jam ask "Hello" --profile work
 | `--provider <name>` | Override provider |
 | `--base-url <url>` | Override provider base URL |
 | `--profile <name>` | Use a named config profile |
-| `--no-color` | Strip ANSI colors from output |
+| `--no-tools` | Disable read-only tool use (file discovery) |
+| `--no-color` | Strip ANSI colors from output (global flag) |
 
 ---
 
@@ -236,6 +237,50 @@ jam diff --staged --json    # JSON output
 
 ---
 
+### `jam review`
+
+Review a branch or pull request with AI.
+
+```bash
+jam review                        # review current branch against main
+jam review --base develop         # diff against a different base branch
+jam review --pr 42                # review a specific PR (requires GitHub CLI)
+jam review --json                 # JSON output
+```
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--base <ref>` | Base branch or ref to diff against (default: `main`) |
+| `--pr <number>` | Review a specific PR number (requires `gh` CLI) |
+| `--json` | Machine-readable JSON output |
+
+---
+
+### `jam commit`
+
+Generate an AI-written commit message from staged changes and commit.
+
+```bash
+jam commit                 # generate message, confirm, then commit
+jam commit --dry           # generate message only, do not commit
+jam commit --yes           # skip confirmation prompt
+jam commit --amend         # amend the last commit with a new AI message
+```
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--dry` | Generate the message but do not commit |
+| `--yes` | Auto-confirm without prompting |
+| `--amend` | Amend the last commit with a new AI-generated message |
+
+Messages follow the [Conventional Commits](https://conventionalcommits.org) specification.
+
+---
+
 ### `jam patch`
 
 Ask the AI to generate a unified diff patch, validate it, and optionally apply it.
@@ -298,6 +343,18 @@ jam auth logout   # remove stored credentials from keychain
 jam config show            # print merged effective config as JSON
 jam config init            # create .jam/config.json in the current directory
 jam config init --global   # create ~/.config/jam/config.json
+```
+
+---
+
+### `jam context`
+
+Manage the `JAM.md` project context file. This file is auto-read by `jam ask` and `jam chat` to give the model awareness of your project's architecture, conventions, and goals.
+
+```bash
+jam context init           # generate JAM.md at the workspace root
+jam context init --force   # overwrite an existing JAM.md
+jam context show           # display the current JAM.md contents
 ```
 
 ---
@@ -461,50 +518,14 @@ npm run test:coverage                 # coverage report
 
 ```
 src/
-├── index.ts              # CLI entry point (commander, lazy imports)
-├── commands/             # One file per command
-│   ├── ask.ts            # jam ask
-│   ├── chat.ts           # jam chat
-│   ├── run.ts            # jam run (agentic loop)
-│   ├── explain.ts        # jam explain
-│   ├── search.ts         # jam search
-│   ├── diff.ts           # jam diff
-│   ├── patch.ts          # jam patch
-│   ├── auth.ts           # jam auth
-│   ├── config.ts         # jam config
-│   ├── models.ts         # jam models
-│   ├── history.ts        # jam history
-│   ├── completion.ts     # jam completion
-│   └── doctor.ts         # jam doctor
-├── providers/            # LLM adapter layer
-│   ├── base.ts           # ProviderAdapter interface
-│   ├── ollama.ts         # Ollama adapter (NDJSON streaming)
-│   └── factory.ts        # createProvider()
-├── tools/                # Model-callable local tools
-│   ├── types.ts          # ToolDefinition, ToolResult interfaces
-│   ├── registry.ts       # ToolRegistry + permission enforcement
-│   ├── read_file.ts
-│   ├── list_dir.ts
-│   ├── search_text.ts
-│   ├── git_diff.ts
-│   ├── git_status.ts
-│   ├── apply_patch.ts
-│   └── write_file.ts
-├── config/               # Config loading and schema
-│   ├── schema.ts         # Zod schema
-│   ├── defaults.ts       # Built-in defaults
-│   └── loader.ts         # cosmiconfig + deep merge
-├── storage/
-│   └── history.ts        # Chat session persistence (JSON files)
-├── ui/
-│   ├── chat.tsx          # Ink chat REPL (React TUI)
-│   └── renderer.ts       # Markdown + streaming renderer
-└── utils/
-    ├── errors.ts         # JamError class
-    ├── stream.ts         # withRetry, collectStream
-    ├── logger.ts         # Logger (stderr, redaction)
-    ├── secrets.ts        # keytar + env fallback
-    └── workspace.ts      # Git root detection
+├── index.ts        # CLI entry point — command registration (Commander)
+├── commands/       # One file per command (ask, chat, run, review, commit, …)
+├── providers/      # LLM adapter layer — ProviderAdapter interface + Ollama impl
+├── tools/          # Model-callable tools + registry + permission enforcement
+├── config/         # Zod schema, cosmiconfig loader, built-in defaults
+├── storage/        # Chat session persistence (JSON files)
+├── ui/             # Ink/React TUI (chat REPL) + Markdown/streaming renderer
+└── utils/          # Shared helpers: streaming, logger, secrets, agent loop, tokens
 ```
 
 ---
@@ -587,8 +608,6 @@ We take security seriously. If you discover a vulnerability, please **do not** o
 - [ ] OpenAI / Azure OpenAI provider
 - [ ] Anthropic Claude provider
 - [ ] Groq provider
-- [ ] `jam commit` — AI-generated commit messages
-- [ ] `jam review` — PR review workflow
 - [ ] Plugin system for custom tools
 - [ ] Token usage tracking and budgets
 - [ ] Web UI companion
