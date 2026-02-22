@@ -59,8 +59,12 @@ function buildPlain(): string {
 
 // ── Build coloured box (synchronous ANSI, no chalk needed) ──────────────────
 
+// Strip ANSI escape codes to get the visible (printable) length of a string.
+const visibleLength = (s: string): number =>
+  s.replace(/\x1b\[[0-9;]*m/g, '').length;
+
 function buildColored(): string {
-  const pad   = (s: string) => s + ' '.repeat(innerWidth - 2 - s.length);
+  const pad   = (s: string) => s + ' '.repeat(Math.max(0, innerWidth - 2 - visibleLength(s)));
   const blank = ansi(A.dim, `│${' '.repeat(innerWidth)}│`);
 
   const boxLine = (middle: string) =>
