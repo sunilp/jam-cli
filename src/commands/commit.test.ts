@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { MockInstance } from 'vitest';
 
 // ── Module mocks ──────────────────────────────────────────────────────────────
 
@@ -116,17 +117,17 @@ function setupHappyPath() {
 }
 
 describe('runCommit', () => {
-  let processExitSpy: ReturnType<typeof vi.spyOn>;
-  let stderrSpy: ReturnType<typeof vi.spyOn>;
-  let stdoutSpy: ReturnType<typeof vi.spyOn>;
+  let processExitSpy: MockInstance<[code?: string | number | null | undefined], never>;
+  let stderrSpy: MockInstance<[str: string | Uint8Array, encoding?: BufferEncoding, cb?: (err?: Error | null) => void], boolean>;
+  let stdoutSpy: MockInstance<[str: string | Uint8Array, encoding?: BufferEncoding, cb?: (err?: Error | null) => void], boolean>;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    processExitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {
+    processExitSpy = vi.spyOn(process, 'exit').mockImplementation((_code?: string | number | null) => {
       throw new Error('process.exit called');
-    }) as (code?: number) => never);
-    stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
-    stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    });
+    stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true) as typeof stderrSpy;
+    stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true) as typeof stdoutSpy;
   });
 
   afterEach(() => {
