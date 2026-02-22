@@ -34,7 +34,8 @@ export async function runConfigInit(options: { global?: boolean } = {}): Promise
     let configPath: string;
 
     if (options.global) {
-      configDir = join(homedir(), '.config', 'jam');
+      // Use ~/.jam/config.json as the preferred user-level location
+      configDir = join(homedir(), '.jam');
       configPath = join(configDir, 'config.json');
     } else {
       configDir = join(process.cwd(), '.jam');

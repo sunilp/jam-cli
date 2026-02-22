@@ -62,7 +62,38 @@ async function loadFile(searchFrom: string): Promise<Partial<JamConfig>> {
   return parsed.data;
 }
 
-async function loadUserConfig(): Promise<Partial<JamConfig>> {
+/**
+ * Load config from ~/.jam/config.json (user home-directory dotfile).
+ * This is the preferred user-level config location.
+ */
+async function loadDotJamConfig(): Promise<Partial<JamConfig>> {
+  const dotJamDir = join(homedir(), '.jam');
+
+  if (!existsSync(dotJamDir)) return {};
+
+  const explorer = cosmiconfig(MODULE_NAME, {
+    searchPlaces: ['config.json', 'config.yaml', 'config.yml'],
+    stopDir: dotJamDir,
+  });
+
+  const result = await explorer.search(dotJamDir);
+  if (!result) return {};
+
+  const parsed = JamConfigSchema.partial().safeParse(result.config);
+  if (!parsed.success) {
+    throw new JamError(
+      `Invalid config at ${result.filepath}: ${parsed.error.message}`,
+      'CONFIG_INVALID'
+    );
+  }
+  return parsed.data;
+}
+
+/**
+ * Load config from ~/.config/jam/config.json (XDG-style user config).
+ * Lower priority than ~/.jam/config.json.
+ */
+async function loadXdgUserConfig(): Promise<Partial<JamConfig>> {
   const userConfigDir = join(homedir(), '.config', MODULE_NAME);
 
   if (!existsSync(userConfigDir)) return {};
@@ -89,10 +120,18 @@ export async function loadConfig(
   cwd: string = process.cwd(),
   cliOverrides: CliOverrides = {}
 ): Promise<JamConfig> {
-  const userConfig = await loadUserConfig();
+  // Merge order (lowest → highest priority):
+  //   1. Built-in defaults
+  //   2. ~/.config/jam/config.json  (XDG user config)
+  //   3. ~/.jam/config.json         (home-dir dotfile — preferred)
+  //   4. .jam/config.json / .jamrc  (repo-level)
+  //   5. CLI flags
+  const xdgConfig = await loadXdgUserConfig();
+  const dotJamConfig = await loadDotJamConfig();
   const repoConfig = await loadFile(cwd);
 
-  let config = mergeConfigs(CONFIG_DEFAULTS, userConfig);
+  let config = mergeConfigs(CONFIG_DEFAULTS, xdgConfig);
+  config = mergeConfigs(config, dotJamConfig);
   config = mergeConfigs(config, repoConfig);
 
   // Apply CLI overrides to the active profile

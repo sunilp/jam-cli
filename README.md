@@ -58,7 +58,8 @@ Most AI coding tools are built around a single vendor's model, require a browser
 | 📂 | **Repo-aware** | Explain files, search code, review diffs with full workspace context |
 | 🩹 | **Patch workflow** | Generate unified diffs, validate, preview, and apply with confirmation |
 | 🤖 | **Tool-calling agent** | `jam run` gives the model access to local tools (read, search, diff, apply) |
-| 🔌 | **Pluggable providers** | Ollama, OpenAI, Groq built-in; adapter pattern for adding any LLM |
+| 🔌 | **Pluggable providers** | Ollama, OpenAI, Groq, **Embedded** built-in; adapter pattern for adding any LLM |
+| 📦 | **Embedded inference** | **[Experimental]** Run without Ollama — tiny GGUF model runs directly in-process via `node-llama-cpp` |
 | ⚙️ | **Layered config** | Global → repo → CLI flags; multiple named profiles |
 | 🔐 | **Secure secrets** | OS keychain via keytar, env var fallback |
 | 🐚 | **Shell completions** | Bash and Zsh |
@@ -100,8 +101,10 @@ Most AI coding tools are built around a single vendor's model, require a browser
 ### Prerequisites
 
 - **Node.js 20+**
-- **[Ollama](https://ollama.ai)** running locally (`ollama serve`)
-- A pulled model: `ollama pull llama3.2`
+- **One of the following model backends:**
+  - **[Ollama](https://ollama.ai)** running locally (`ollama serve`) + a pulled model (`ollama pull llama3.2`)
+  - **Embedded mode** — no server needed! Uses `node-llama-cpp` to run a tiny GGUF model in-process.
+    Install with: `npm install node-llama-cpp` (auto-downloads a ~250 MB model on first run)
 
 ### Install
 
@@ -422,11 +425,15 @@ Checks:
 Jam merges config in priority order (highest wins):
 
 ```
-1. CLI flags
-2. .jam/config.json  or  .jamrc  (repo-level)
-3. ~/.config/jam/config.json     (user-level)
-4. Built-in defaults
+1. CLI flags                              (--provider, --model, etc.)
+2. .jam/config.json  or  .jamrc           (repo-level)
+3. ~/.jam/config.json                     (user home-dir dotfile — preferred)
+4. ~/.config/jam/config.json              (XDG user config — fallback)
+5. Built-in defaults
 ```
+
+> **Recommended:** Use `~/.jam/config.json` for your personal settings (provider, API keys, default model).  
+> Use `.jam/config.json` at the repo root for project-specific overrides (tool policy, redact patterns).
 
 ### Config Schema
 
@@ -446,6 +453,10 @@ Jam merges config in priority order (highest wins):
       "provider": "ollama",
       "model": "qwen2.5-coder:1.5b",
       "baseUrl": "http://localhost:11434"
+    },
+    "embedded": {
+      "provider": "embedded",
+      "model": "smollm2-360m"
     }
   },
   "toolPolicy": "ask_every_time",
@@ -472,7 +483,7 @@ Jam merges config in priority order (highest wins):
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `provider` | string | Provider name (`ollama`, `openai`, `groq`) |
+| `provider` | string | Provider name (`ollama`, `openai`, `groq`, `embedded`) |
 | `model` | string | Model ID (e.g. `llama3.2`, `codellama`) |
 | `baseUrl` | string | Provider API base URL |
 | `apiKey` | string | API key (prefer keychain or env vars) |
@@ -483,11 +494,43 @@ Jam merges config in priority order (highest wins):
 ### Initialize Config
 
 ```bash
-# Repo-level (committed to version control)
-jam config init
-
-# User-level (applies everywhere)
+# User-level — creates ~/.jam/config.json (recommended)
 jam config init --global
+
+# Repo-level — creates .jam/config.json (committed to version control)
+jam config init
+```
+
+The global config at `~/.jam/config.json` is the best place to set your default provider, model, API keys, and personal preferences. Edit it directly:
+
+```bash
+# Example: switch default provider to embedded
+vim ~/.jam/config.json
+```
+
+```json
+{
+  "defaultProfile": "default",
+  "profiles": {
+    "default": {
+      "provider": "ollama",
+      "model": "llama3.2",
+      "baseUrl": "http://localhost:11434"
+    },
+    "openai": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "apiKey": "sk-..."
+    },
+    "offline": {
+      "provider": "embedded",
+      "model": "smollm2-360m"
+    }
+  },
+  "toolPolicy": "ask_every_time",
+  "historyEnabled": true,
+  "logLevel": "warn"
+}
 ```
 
 ### Using Profiles
@@ -513,6 +556,72 @@ echo '{"defaultProfile": "fast"}' > .jamrc
 
 ---
 
+## Embedded Provider — Experimental ⚗️
+
+> **⚠️ EXPERIMENTAL** — The embedded provider is functional but quality is limited by small model sizes. For production workloads, use Ollama or OpenAI.
+
+The `embedded` provider runs a tiny GGUF model **directly in-process** via [`node-llama-cpp`](https://github.com/withcatai/node-llama-cpp). No Ollama installation, no server process, no network calls. **Models are only downloaded when you explicitly set `provider: "embedded"`** — it never downloads anything unless you opt in.
+
+### Setup
+
+```bash
+# Install the native dependency (optional — only needed for embedded mode)
+npm install node-llama-cpp
+
+# Switch to embedded provider
+jam ask "Hello" --provider embedded
+
+# Or set it permanently in your config
+jam config init --global   # then edit ~/.jam/config.json
+```
+
+### How It Works
+
+1. On first use, Jam auto-downloads a small model (~250 MB) to `~/.jam/models/`
+2. The model loads in-process using llama.cpp bindings — no external server
+3. Streaming, tool-calling, and all standard commands work as usual
+
+### Available Models
+
+| Alias | Size (Q4_K_M) | Notes |
+|-------|---------------|-------|
+| `smollm2-135m` | ~100 MB | Ultra-light, very fast, basic quality |
+| `smollm2-360m` | ~250 MB | **Default** — good quality-to-size ratio |
+| `smollm2-1.7b` | ~1 GB | Best quality for embedded, needs more RAM |
+
+```bash
+# Use a specific embedded model alias
+jam ask "Explain git rebase" --provider embedded --model smollm2-1.7b
+
+# Or point to any local GGUF file
+jam ask "Hello" --provider embedded --model /path/to/custom-model.gguf
+
+# Profile-based setup
+# In ~/.jam/config.json:
+# {
+#   "profiles": {
+#     "offline": {
+#       "provider": "embedded",
+#       "model": "smollm2-1.7b"
+#     }
+#   }
+# }
+jam ask "Hello" --profile offline
+```
+
+### When to Use Embedded vs Ollama
+
+| Scenario | Recommendation |
+|----------|---------------|
+| No Ollama / can't install system software | **Embedded** |
+| CI/CD pipeline, Docker container, SSH box | **Embedded** |
+| Air-gapped / offline machine | **Embedded** (after initial model download) |
+| Want best quality & larger models (7B+) | **Ollama** |
+| GPU acceleration needed | **Ollama** |
+| Already have Ollama running | **Ollama** |
+
+---
+
 ## Development
 
 ```bash
@@ -531,7 +640,7 @@ npm run test:coverage                 # coverage report
 src/
 ├── index.ts        # CLI entry point — command registration (Commander)
 ├── commands/       # One file per command (ask, chat, run, review, commit, …)
-├── providers/      # LLM adapter layer — ProviderAdapter interface + Ollama impl
+├── providers/      # LLM adapter layer — ProviderAdapter interface + Ollama, Embedded impl
 ├── tools/          # Model-callable tools + registry + permission enforcement
 ├── config/         # Zod schema, cosmiconfig loader, built-in defaults
 ├── storage/        # Chat session persistence (JSON files)

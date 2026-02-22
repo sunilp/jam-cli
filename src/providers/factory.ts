@@ -31,8 +31,19 @@ export async function createProvider(profile: Profile): Promise<ProviderAdapter>
     });
   }
 
+  if (provider === 'embedded') {
+    process.stderr.write(
+      '\n  \x1b[33m[EXPERIMENTAL]\x1b[0m Using embedded provider — model runs in-process via node-llama-cpp.\n' +
+      '  Model will be downloaded on first use only when provider is set to "embedded".\n\n'
+    );
+    const { EmbeddedAdapter } = await import('./embedded.js');
+    return new EmbeddedAdapter({
+      model: profile.model,
+    });
+  }
+
   throw new JamError(
-    `Unknown provider: "${provider}". Supported providers: ollama, openai, groq`,
+    `Unknown provider: "${provider}". Supported providers: ollama, openai, groq, embedded`,
     'CONFIG_INVALID'
   );
 }

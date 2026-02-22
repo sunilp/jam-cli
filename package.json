@@ -1,6 +1,6 @@
 {
   "name": "@sunilp-org/jam-cli",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Jam — developer-first AI assistant CLI for the terminal. Ask questions, explain code, review diffs, generate patches, and run agentic tasks powered by Ollama.",
   "type": "module",
   "license": "MIT",
@@ -23,6 +23,7 @@
     "assistant",
     "terminal",
     "ollama",
+    "embedded",
     "llm",
     "developer-tools",
     "code-review",
@@ -54,7 +55,8 @@
     "clean": "rm -rf dist"
   },
   "optionalDependencies": {
-    "keytar": "^7.9.0"
+    "keytar": "^7.9.0",
+    "node-llama-cpp": "^3.0.0"
   },
   "dependencies": {
     "chalk": "^5.3.0",
