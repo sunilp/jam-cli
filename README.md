@@ -619,6 +619,234 @@ We take security seriously. If you discover a vulnerability, please **do not** o
 
 ---
 
+## Probable Enhancements
+
+> Ideas and directions under consideration. These range from quick wins to deep architectural changes. Contributions, RFCs, and discussion on any of these are welcome.
+
+### 🧩 Plugin System
+
+The tool registry (`ToolRegistry.register()`) already accepts any `ToolDefinition`, but tool discovery is hardcoded. A proper plugin system would allow external tools without modifying source.
+
+- **Local plugins** — load `ToolDefinition` modules from `.jam/plugins/` or `~/.config/jam/plugins/`
+- **npm plugin packages** — `jam plugin install @scope/jam-plugin-docker` discovers and registers tools at startup
+- **Plugin manifest** — declarative `jam-plugin.json` with name, version, tool definitions, required permissions
+- **Lifecycle hooks** — `onActivate`, `onDeactivate`, `beforeToolCall`, `afterToolCall` for plugin-level middleware
+- **Sandboxed execution** — plugins run with restricted filesystem/network access based on declared capabilities
+
+```
+jam plugin install jam-plugin-docker
+jam plugin list
+jam plugin remove jam-plugin-docker
+```
+
+### 🎯 Skills
+
+Skills are named, composable mini-agents — each with a focused system prompt, a curated tool subset, and a defined output contract. Think of them as recipes the model can invoke.
+
+- **Built-in skills** — `refactor`, `test-writer`, `documenter`, `security-audit`, `dependency-update`, `migration`
+- **Skill registry** — each skill declares its name, description, required tools, system prompt template, and output schema
+- **Composable** — skills can call other skills (e.g., `refactor` invokes `test-writer` to verify changes)
+- **User-defined skills** — `.jam/skills/` directory with YAML/JSON skill definitions
+- **Skill marketplace** — share and import community skills via npm or a registry
+
+```yaml
+# .jam/skills/api-endpoint.yaml
+name: api-endpoint
+description: Generate a new REST API endpoint with tests
+tools: [read_file, write_file, search_text, run_command]
+system: |
+  You are an API endpoint generator. Given a resource name and
+  fields, generate the route handler, validation, tests, and
+  OpenAPI schema following the project's existing patterns.
+output:
+  type: files
+  confirm: true
+```
+
+```bash
+jam skill run refactor --file src/api/auth.ts
+jam skill run test-writer --file src/utils/cache.ts
+jam skill list
+```
+
+### 🤖 Sub-Agents & Task Decomposition
+
+The current agent loop (`jam run`) is a single monolithic ReAct loop. Sub-agents would enable the planner to decompose complex instructions into specialized child tasks.
+
+- **Planner agent** — breaks a complex instruction into an ordered DAG of sub-tasks
+- **Specialist delegation** — each sub-task dispatched to a purpose-built sub-agent (e.g., "read and understand", "refactor", "write tests", "verify")
+- **Result aggregation** — parent agent collects sub-agent outputs and synthesizes a final result
+- **Parallel sub-agents** — independent sub-tasks execute concurrently (e.g., "write tests" and "update docs" in parallel)
+- **Scoped context** — each sub-agent receives only the context it needs, reducing token waste
+- **Fail-and-retry isolation** — a failed sub-agent can be retried without restarting the entire task
+
+```bash
+jam run "Refactor the auth module to use JWT, update all tests, and document the changes"
+# Planner decomposes into:
+#   1. [understand] Read current auth module and tests
+#   2. [refactor]   Rewrite auth module with JWT
+#   3. [test]       Update tests for new implementation  (parallel with 4)
+#   4. [document]   Update docs and JSDoc comments        (parallel with 3)
+#   5. [verify]     Run tests and validate the patch
+```
+
+### 🔌 Connectors
+
+Connectors are adapters for external services — bringing data in and pushing results out. Currently Jam only understands the local filesystem and git.
+
+- **GitHub** — read/create issues, PRs, review comments; `jam review --pr 42` already shells out to `gh`, a connector would be native
+- **GitLab / Bitbucket** — equivalent PR/MR workflows for non-GitHub teams
+- **JIRA / Linear / Shortcut** — fetch issue context, update status, attach AI-generated summaries
+- **Slack / Discord** — post review summaries, commit digests, or search results to channels
+- **Database** — read schema, run read-only queries, explain query plans
+- **REST / GraphQL** — generic HTTP connector for internal APIs (`jam ask "Why is /api/users slow?" --connector api-prod`)
+- **Docker / K8s** — read container logs, describe pods, inspect images
+- **CI/CD** — read build logs, trigger pipelines, analyze failures
+
+```json
+// .jam/config.json
+{
+  "connectors": {
+    "github": { "token": "env:GITHUB_TOKEN" },
+    "jira": { "baseUrl": "https://myorg.atlassian.net", "token": "env:JIRA_TOKEN" },
+    "postgres": { "connectionString": "env:DATABASE_URL", "readOnly": true }
+  }
+}
+```
+
+### 🧠 MCP (Model Context Protocol) Support
+
+[MCP](https://modelcontextprotocol.io) is an open standard for connecting AI models to external tools and data sources. Adding MCP client support would let Jam consume any MCP-compatible server.
+
+- **MCP client** — Jam discovers and connects to MCP servers declared in config
+- **Tool bridge** — MCP tools appear as native Jam tools in the registry, usable by `jam run`
+- **Resource bridge** — MCP resources (files, database rows, API responses) injected as context
+- **Prompt bridge** — MCP prompt templates available as Jam skills
+- **Server mode** — expose Jam's own tools (read_file, search_text, git_diff, etc.) as an MCP server for other agents
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "filesystem": { "command": "npx @modelcontextprotocol/server-filesystem /path/to/dir" },
+      "postgres":   { "command": "npx @modelcontextprotocol/server-postgres", "env": { "DATABASE_URL": "..." } }
+    }
+  }
+}
+```
+
+### ⚡ Parallel Tool Execution
+
+Currently tools execute sequentially within each agent round. When the model requests multiple independent tool calls (e.g., read three files), they could run concurrently.
+
+- **Dependency analysis** — detect independent tool calls within a single round
+- **Concurrent dispatch** — `Promise.all()` for independent read operations
+- **Write serialization** — write tools always execute sequentially and with confirmation
+- **Progress display** — show parallel tool execution status in real time
+
+### 🔗 Middleware & Hooks
+
+A middleware chain around LLM calls and tool executions, enabling cross-cutting concerns without modifying core logic.
+
+- **Pre/post LLM hooks** — prompt injection defense, cost tracking, audit logging
+- **Pre/post tool hooks** — rate limiting, output sanitization, metrics
+- **Error interceptors** — custom retry logic, fallback providers, graceful degradation
+- **Event emitter** — structured events (`tool:start`, `tool:end`, `llm:stream`, `agent:iteration`) for UI decoupling, telemetry, and external integrations
+
+```typescript
+// .jam/middleware/cost-tracker.ts
+export default {
+  name: 'cost-tracker',
+  afterCompletion({ usage, provider, model }) {
+    const cost = estimateCost(provider, model, usage);
+    appendToLog(`~/.jam/cost.csv`, { timestamp: Date.now(), model, cost });
+  }
+};
+```
+
+### 🧭 Embeddings & Vector Search
+
+The current past-session search uses keyword overlap (Jaccard scoring), and the symbol index is regex-based. Optional local embeddings would enable true semantic search.
+
+- **Local embedding model** — use Ollama's embedding endpoint (`nomic-embed-text`, `mxbai-embed-large`) so nothing leaves your machine
+- **Codebase index** — vector index of functions, classes, and doc comments stored at `.jam/vectors/`
+- **Semantic code search** — `jam search "authentication flow"` returns semantically relevant code, not just keyword matches
+- **Session memory** — embed past Q&A pairs for cross-session context recall with relevance decay
+- **RAG pipeline** — retrieve relevant code chunks before prompting, reducing token usage and improving accuracy
+
+### 💰 Cost & Token Tracking
+
+`TokenUsage` is already captured per request but not aggregated or displayed.
+
+- **Session cost estimation** — estimate cost based on provider pricing (configurable per-profile)
+- **Budget limits** — `maxCostPerSession`, `maxCostPerDay` in config; warn or hard-stop when exceeded
+- **Usage dashboard** — `jam usage` command showing tokens consumed, cost by model, by command, over time
+- **Token budget per tool call** — prevent runaway context from a single large file read
+
+```bash
+jam usage                # summary: today, this week, this month
+jam usage --detail       # per-session breakdown
+jam usage --export csv   # export for expense tracking
+```
+
+### 📦 Multi-File Transactions
+
+`apply_patch` and `write_file` currently operate on single files with no rollback mechanism.
+
+- **Transaction block** — group multiple file writes into an atomic operation
+- **Git stash checkpoint** — auto-stash before a multi-file edit, restore on failure
+- **Dry-run preview** — show all proposed changes across files before any writes
+- **Selective accept** — accept/reject individual file changes within a transaction
+
+### 🔍 Provider Capabilities & Feature Negotiation
+
+The `ProviderAdapter` interface treats all providers equally, but providers differ in capabilities.
+
+- **Capability flags** — `supportsToolCalling`, `supportsVision`, `supportsStructuredOutput`, `supportsEmbeddings` on `ProviderInfo`
+- **Graceful degradation** — if a provider doesn't support tool calling, fall back to prompt-based tool simulation
+- **Model capability discovery** — query the provider for model-specific features at runtime
+- **Auto-routing** — route tasks to the best-fit model/provider (e.g., use a fast model for planning, a capable model for generation)
+
+### 🧠 Persistent Agent Memory
+
+Working memory is currently session-scoped. Cross-session memory would make Jam smarter over time.
+
+- **Workspace knowledge base** — facts, patterns, and conventions learned from past sessions, stored per-repo
+- **Memory decay** — older memories lose relevance weight over time unless reinforced
+- **Explicit memory** — `jam remember "the auth module uses bcrypt, not argon2"` for user-declared facts
+- **Memory retrieval** — automatically surface relevant memories during planning and synthesis
+- **Forgetting** — `jam forget` to clear or selectively prune memories
+
+### 🌐 Web UI Companion
+
+A local web interface for sessions that benefit from richer display.
+
+- **Diff viewer** — syntax-highlighted side-by-side diffs for `jam patch` and `jam review`
+- **Session browser** — visual history of past chat sessions with search
+- **Tool call inspector** — expandable timeline of every tool call, its input, output, and duration
+- **Markdown preview** — rendered Markdown responses with code block copy buttons
+- **Served locally** — `jam ui` starts a local server; no external hosting
+
+### 🧪 Testing & Verification Skills
+
+First-class support for test generation and verification.
+
+- **Test generation** — `jam test generate src/utils/cache.ts` generates tests matching project conventions
+- **Test-driven patch** — `jam patch` can optionally run tests before and after applying changes
+- **Coverage-aware context** — prioritize uncovered code paths in review and audit workflows
+- **Regression detection** — track which tests fail after a patch and auto-revert if needed
+
+### 🐚 Shell Integration & Workflow Automation
+
+Deeper shell integration for power users and CI/CD pipelines.
+
+- **Git hooks** — `jam hooks install` sets up pre-commit (auto-lint), prepare-commit-msg (AI message), pre-push (review)
+- **Watch mode** — `jam watch` monitors file changes and provides continuous AI feedback
+- **Pipeline mode** — structured JSON I/O for chaining Jam commands in shell scripts and CI
+- **Makefile/Taskfile recipes** — pre-built task definitions for common workflows
+
+---
+
 ## Acknowledgments
 
 Built with these excellent open source projects:
