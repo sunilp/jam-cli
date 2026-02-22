@@ -12,7 +12,6 @@ import {
   enrichUserPrompt,
   generateSearchPlan,
   buildSynthesisReminder,
-  validateAnswer,
   buildCorrectionMessage,
   formatToolCall,
   formatToolResult,
@@ -22,6 +21,12 @@ import {
   formatHintInjection,
   formatUsage,
 } from '../utils/agent.js';
+import { WorkingMemory } from '../utils/memory.js';
+import { ToolResultCache } from '../utils/cache.js';
+import { criticEvaluate, buildCriticCorrection } from '../utils/critic.js';
+import { searchPastSessions, formatPastExchanges } from '../utils/past-sessions.js';
+import { getOrBuildIndex, searchSymbols, formatSymbolResults } from '../utils/index-builder.js';
+import { updateContextWithUsage } from '../utils/context.js';
 import type { CliOverrides, ToolPolicy } from '../config/schema.js';
 import type { Message } from '../providers/base.js';
 
@@ -64,9 +69,26 @@ export async function runRun(instruction: string | undefined, options: RunOption
       profile.systemPrompt ??
       buildSystemPrompt(jamContext, workspaceCtx, { mode: 'readwrite', workspaceRoot });
 
+    const memory = new WorkingMemory(adapter, profile.model, systemPrompt);
+    const cache = new ToolResultCache();
+
+    // ── Symbol index + past sessions ──────────────────────────────────────
+    let symbolHint = '';
+    try {
+      const index = await getOrBuildIndex(workspaceRoot);
+      const symbols = searchSymbols(index, instruction, 10);
+      symbolHint = formatSymbolResults(symbols);
+    } catch { /* non-fatal */ }
+
+    let pastContext = '';
+    try {
+      const pastExchanges = await searchPastSessions(instruction, workspaceRoot, 2);
+      pastContext = formatPastExchanges(pastExchanges);
+    } catch { /* non-fatal */ }
+
     // ── Planning phase ────────────────────────────────────────────────────
     process.stderr.write(formatSeparator('Planning', noColor));
-    const projectCtxForPlan = jamContext ?? workspaceCtx;
+    const projectCtxForPlan = [jamContext ?? workspaceCtx, symbolHint, pastContext].filter(Boolean).join('\n\n');
     const searchPlan = await generateSearchPlan(adapter, instruction, projectCtxForPlan, {
       model: profile.model,
       temperature: profile.temperature,
@@ -82,7 +104,7 @@ export async function runRun(instruction: string | undefined, options: RunOption
     // Enrich the instruction with the search plan
     const enrichedInstruction = enrichUserPrompt(instruction, searchPlan);
 
-    const messages: Message[] = [
+    let messages: Message[] = [
       { role: 'user', content: enrichedInstruction },
     ];
 
@@ -93,12 +115,36 @@ export async function runRun(instruction: string | undefined, options: RunOption
       process.exit(1);
     }
 
+    /** Render final markdown result + usage stats. */
+    const renderResult = async (text: string, usage?: { promptTokens: number; completionTokens: number; totalTokens: number }) => {
+      process.stderr.write(formatSeparator('Result', noColor));
+      if (text) {
+        try {
+          const rendered = await renderMarkdown(text);
+          process.stdout.write(rendered);
+        } catch {
+          process.stdout.write(text + '\n');
+        }
+      }
+      if (usage) {
+        process.stderr.write(`\n${formatUsage(usage.promptTokens, usage.completionTokens, usage.totalTokens, noColor)}\n`);
+      }
+      const log = memory.getAccessLog();
+      updateContextWithUsage(workspaceRoot, log.readFiles, log.searchQueries).catch(() => {});
+    };
+
     // Agentic loop
     const MAX_ITERATIONS = 15;
     let synthesisInjected = false;
     process.stderr.write(formatSeparator('Working', noColor));
 
     for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
+      // Context window management
+      if (memory.shouldCompact(messages)) {
+        process.stderr.write(formatRetry('Compacting context…', noColor) + '\n');
+        messages = await memory.compact(messages);
+      }
+
       const response = await adapter.chatWithTools(messages, ALL_TOOL_SCHEMAS, {
         model: profile.model,
         temperature: profile.temperature,
@@ -110,28 +156,20 @@ export async function runRun(instruction: string | undefined, options: RunOption
       if (!response.toolCalls || response.toolCalls.length === 0) {
         const finalText = response.content ?? '';
 
-        // Synthesis grounding
+        // Synthesis grounding with critic
         if (tracker.totalCalls > 0 && !synthesisInjected && iteration < MAX_ITERATIONS - 2) {
           synthesisInjected = true;
           if (finalText.trim().length > 0) {
-            const validation = validateAnswer(finalText, true, instruction);
-            if (validation.valid) {
-              // Answer is already good
-              process.stderr.write(formatSeparator('Result', noColor));
-              if (finalText) {
-                try {
-                  const rendered = await renderMarkdown(finalText);
-                  process.stdout.write(rendered);
-                } catch {
-                  process.stdout.write(finalText + '\n');
-                }
-              }
-              if (response.usage) {
-                const u = response.usage;
-                process.stderr.write(`\n${formatUsage(u.promptTokens, u.completionTokens, u.totalTokens, noColor)}\n`);
-              }
+            process.stderr.write(formatRetry('Evaluating answer quality…', noColor) + '\n');
+            const verdict = await criticEvaluate(adapter, instruction, finalText, { model: profile.model });
+            if (verdict.pass) {
+              await renderResult(finalText, response.usage);
               break;
             }
+            process.stderr.write(formatRetry(`Critic: ${verdict.reason}`, noColor) + '\n');
+            messages.push({ role: 'assistant', content: finalText });
+            messages.push({ role: 'user', content: buildCriticCorrection(verdict, instruction) });
+            continue;
           }
           process.stderr.write(formatRetry('Grounding answer to your question…', noColor) + '\n');
           messages.push({ role: 'assistant', content: finalText });
@@ -139,31 +177,18 @@ export async function runRun(instruction: string | undefined, options: RunOption
           continue;
         }
 
-        // Self-validation
-        const validation = validateAnswer(finalText, tracker.totalCalls > 0, instruction);
-        if (!validation.valid && iteration < MAX_ITERATIONS - 2) {
-          process.stderr.write(formatRetry('Answer quality check failed, retrying…', noColor) + '\n');
-          messages.push({ role: 'assistant', content: finalText });
-          messages.push({ role: 'user', content: buildCorrectionMessage(validation.reason!) });
-          continue;
-        }
-
-        process.stderr.write(formatSeparator('Result', noColor));
-
-        // Render as markdown
-        if (finalText) {
-          try {
-            const rendered = await renderMarkdown(finalText);
-            process.stdout.write(rendered);
-          } catch {
-            process.stdout.write(finalText + '\n');
+        // Final critic check
+        if (tracker.totalCalls > 0 && finalText.trim().length > 30 && iteration < MAX_ITERATIONS - 2) {
+          const verdict = await criticEvaluate(adapter, instruction, finalText, { model: profile.model });
+          if (!verdict.pass) {
+            process.stderr.write(formatRetry(`Critic: ${verdict.reason}`, noColor) + '\n');
+            messages.push({ role: 'assistant', content: finalText });
+            messages.push({ role: 'user', content: buildCriticCorrection(verdict, instruction) });
+            continue;
           }
         }
 
-        if (response.usage) {
-          const u = response.usage;
-          process.stderr.write(`\n${formatUsage(u.promptTokens, u.completionTokens, u.totalTokens, noColor)}\n`);
-        }
+        await renderResult(finalText, response.usage);
         break;
       }
 
@@ -189,6 +214,19 @@ export async function runRun(instruction: string | undefined, options: RunOption
         }
 
         const isReadonly = READONLY_TOOL_NAMES.has(tc.name);
+
+        // Check cache for read-only tools
+        if (isReadonly) {
+          const cached = cache.get(tc.name, tc.arguments);
+          if (cached !== null) {
+            process.stderr.write(formatToolCall(tc.name, tc.arguments, noColor) + ' (cached)\n');
+            const capped = memory.processToolResult(tc.name, tc.arguments, cached);
+            messages.push({ role: 'user', content: `[Tool result: ${tc.name}]\n${capped}` });
+            tracker.record(tc.name, tc.arguments, false);
+            continue;
+          }
+        }
+
         process.stderr.write(formatToolCall(tc.name, tc.arguments, noColor) + '\n');
 
         // Confirm write tools based on policy
@@ -220,9 +258,25 @@ export async function runRun(instruction: string | undefined, options: RunOption
           wasError = true;
         }
 
-        process.stderr.write(formatToolResult(toolOutput, noColor) + '\n');
+        // Cache read-only results
+        if (!wasError && isReadonly) cache.set(tc.name, tc.arguments, toolOutput);
+        // Invalidate cache on write operations
+        if (!isReadonly && tc.arguments['path']) {
+          cache.invalidatePath(String(tc.arguments['path']));
+        }
+
+        // Cap tool output before injecting into messages
+        const cappedOutput = memory.processToolResult(tc.name, tc.arguments, toolOutput);
+
+        process.stderr.write(formatToolResult(cappedOutput, noColor) + '\n');
         tracker.record(tc.name, tc.arguments, wasError);
-        messages.push({ role: 'user', content: `[Tool result: ${tc.name}]\n${toolOutput}` });
+        messages.push({ role: 'user', content: `[Tool result: ${tc.name}]\n${cappedOutput}` });
+      }
+
+      // Scratchpad checkpoint
+      if (memory.shouldScratchpad(iteration)) {
+        process.stderr.write(formatRetry('Working memory checkpoint…', noColor) + '\n');
+        messages.push(memory.scratchpadPrompt());
       }
 
       // Inject correction hints if stuck

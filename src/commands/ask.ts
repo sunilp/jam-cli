@@ -13,7 +13,6 @@ import {
   enrichUserPrompt,
   generateSearchPlan,
   buildSynthesisReminder,
-  validateAnswer,
   buildCorrectionMessage,
   formatToolCall,
   formatToolResult,
@@ -23,6 +22,12 @@ import {
   formatHintInjection,
   formatUsage,
 } from '../utils/agent.js';
+import { WorkingMemory } from '../utils/memory.js';
+import { ToolResultCache } from '../utils/cache.js';
+import { criticEvaluate, buildCriticCorrection } from '../utils/critic.js';
+import { searchPastSessions, formatPastExchanges } from '../utils/past-sessions.js';
+import { getOrBuildIndex, searchSymbols, formatSymbolResults } from '../utils/index-builder.js';
+import { updateContextWithUsage } from '../utils/context.js';
 import type { CliOverrides } from '../config/schema.js';
 import type { Message } from '../providers/base.js';
 
@@ -140,10 +145,27 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
     if (useTools && adapter.chatWithTools) {
       const noColor = options.noColor ?? false;
       const tracker = new ToolCallTracker();
+      const memory = new WorkingMemory(adapter, profile.model, systemPrompt);
+      const cache = new ToolResultCache();
+
+      // ── Symbol index: pre-load for planner enrichment ───────────────────
+      let symbolHint = '';
+      try {
+        const index = await getOrBuildIndex(workspaceRoot);
+        const symbols = searchSymbols(index, prompt, 10);
+        symbolHint = formatSymbolResults(symbols);
+      } catch { /* non-fatal */ }
+
+      // ── Past sessions: find relevant prior Q&A ──────────────────────────
+      let pastContext = '';
+      try {
+        const pastExchanges = await searchPastSessions(prompt, workspaceRoot, 2);
+        pastContext = formatPastExchanges(pastExchanges);
+      } catch { /* non-fatal */ }
 
       // ── Planning phase: deep reasoning about what to search for ─────────
       process.stderr.write(formatSeparator('Planning', noColor));
-      const projectCtxForPlan = jamContext ?? workspaceCtx;
+      const projectCtxForPlan = [jamContext ?? workspaceCtx, symbolHint, pastContext].filter(Boolean).join('\n\n');
       const searchPlan = await generateSearchPlan(adapter, prompt, projectCtxForPlan, {
         model: profile.model,
         temperature: profile.temperature,
@@ -158,7 +180,7 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
 
       // Enrich the user's prompt with the search plan
       const enrichedPrompt = enrichUserPrompt(prompt, searchPlan);
-      const messages: Message[] = [{ role: 'user', content: enrichedPrompt }];
+      let messages: Message[] = [{ role: 'user', content: enrichedPrompt }];
 
       const MAX_TOOL_ROUNDS = 15;
       let synthesisInjected = false;
@@ -166,6 +188,12 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
       process.stderr.write(formatSeparator('Searching codebase', noColor));
 
       for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+        // ── Context window management: compact if approaching limit ───────
+        if (memory.shouldCompact(messages)) {
+          process.stderr.write(formatRetry('Compacting context…', noColor) + '\n');
+          messages = await memory.compact(messages);
+        }
+
         const response = await adapter.chatWithTools(messages, READ_ONLY_TOOL_SCHEMAS, {
           model: profile.model,
           temperature: profile.temperature,
@@ -178,42 +206,51 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
           const finalText = response.content ?? '';
 
           // ── Synthesis grounding: remind model of the original question ───
-          // If we gathered context (tool calls made) but haven't injected
-          // a synthesis reminder yet, do so now and ask for one more round.
           if (tracker.totalCalls > 0 && !synthesisInjected && round < MAX_TOOL_ROUNDS - 2) {
             synthesisInjected = true;
-            const synthesisOk = finalText.trim().length > 0;
 
-            // If the model already produced an answer, validate it first
-            if (synthesisOk) {
-              const validation = validateAnswer(finalText, true, prompt);
-              if (validation.valid) {
-                // Answer looks good — render it
+            // If the model already produced an answer, run critic evaluation
+            if (finalText.trim().length > 0) {
+              process.stderr.write(formatRetry('Evaluating answer quality…', noColor) + '\n');
+              const verdict = await criticEvaluate(adapter, prompt, finalText, { model: profile.model });
+              if (verdict.pass) {
                 process.stderr.write(formatSeparator('Answer', noColor));
                 await renderFinalAnswer(finalText, response.usage, options, profile, noColor);
+                // Auto-update JAM.md with usage patterns
+                const log = memory.getAccessLog();
+                updateContextWithUsage(workspaceRoot, log.readFiles, log.searchQueries).catch(() => {});
                 return;
               }
+              // Critic rejected — use its specific feedback
+              process.stderr.write(formatRetry(`Critic: ${verdict.reason}`, noColor) + '\n');
+              messages.push({ role: 'assistant', content: finalText });
+              messages.push({ role: 'user', content: buildCriticCorrection(verdict, prompt) });
+              continue;
             }
 
-            // Inject synthesis reminder and retry
+            // No answer yet — inject synthesis reminder
             process.stderr.write(formatRetry('Grounding answer to your question…', noColor) + '\n');
             messages.push({ role: 'assistant', content: finalText });
             messages.push({ role: 'user', content: buildSynthesisReminder(prompt) });
             continue;
           }
 
-          // ── Self-validation: check if the answer looks like garbage ──
-          const validation = validateAnswer(finalText, tracker.totalCalls > 0, prompt);
-
-          if (!validation.valid && round < MAX_TOOL_ROUNDS - 2) {
-            process.stderr.write(formatRetry('Answer quality check failed, retrying…', noColor) + '\n');
-            messages.push({ role: 'assistant', content: finalText });
-            messages.push({ role: 'user', content: buildCorrectionMessage(validation.reason!) });
-            continue;
+          // ── Final critic check ──────────────────────────────────────────
+          if (tracker.totalCalls > 0 && finalText.trim().length > 30 && round < MAX_TOOL_ROUNDS - 2) {
+            const verdict = await criticEvaluate(adapter, prompt, finalText, { model: profile.model });
+            if (!verdict.pass) {
+              process.stderr.write(formatRetry(`Critic: ${verdict.reason}`, noColor) + '\n');
+              messages.push({ role: 'assistant', content: finalText });
+              messages.push({ role: 'user', content: buildCriticCorrection(verdict, prompt) });
+              continue;
+            }
           }
 
           process.stderr.write(formatSeparator('Answer', noColor));
           await renderFinalAnswer(finalText, response.usage, options, profile, noColor);
+          // Auto-update JAM.md with usage patterns
+          const log = memory.getAccessLog();
+          updateContextWithUsage(workspaceRoot, log.readFiles, log.searchQueries).catch(() => {});
           return;
         }
 
@@ -232,6 +269,16 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
             continue;
           }
 
+          // Check cache first
+          const cached = cache.get(tc.name, tc.arguments);
+          if (cached !== null) {
+            process.stderr.write(formatToolCall(tc.name, tc.arguments, noColor) + ' (cached)\n');
+            const capped = memory.processToolResult(tc.name, tc.arguments, cached);
+            messages.push({ role: 'user', content: `[Tool result: ${tc.name}]\n${capped}` });
+            tracker.record(tc.name, tc.arguments, false);
+            continue;
+          }
+
           process.stderr.write(formatToolCall(tc.name, tc.arguments, noColor) + '\n');
 
           let toolOutput: string;
@@ -243,10 +290,22 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
             wasError = true;
           }
 
-          process.stderr.write(formatToolResult(toolOutput, noColor) + '\n');
+          // Cache the result
+          if (!wasError) cache.set(tc.name, tc.arguments, toolOutput);
+
+          // Cap the output before injecting into messages
+          const cappedOutput = memory.processToolResult(tc.name, tc.arguments, toolOutput);
+
+          process.stderr.write(formatToolResult(cappedOutput, noColor) + '\n');
           tracker.record(tc.name, tc.arguments, wasError);
 
-          messages.push({ role: 'user', content: `[Tool result: ${tc.name}]\n${toolOutput}` });
+          messages.push({ role: 'user', content: `[Tool result: ${tc.name}]\n${cappedOutput}` });
+        }
+
+        // ── Scratchpad: periodic working memory checkpoint ─────────────────
+        if (memory.shouldScratchpad(round)) {
+          process.stderr.write(formatRetry('Working memory checkpoint…', noColor) + '\n');
+          messages.push(memory.scratchpadPrompt());
         }
 
         // ── Inject correction hints if stuck ──────────────────────────────────

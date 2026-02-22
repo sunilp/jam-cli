@@ -341,3 +341,85 @@ export async function contextFileExists(workspaceRoot: string): Promise<boolean>
     return false;
   }
 }
+
+// ── Auto-update JAM.md with usage patterns (P2-7) ────────────────────────────
+
+const USAGE_SECTION_HEADER = '## Frequently Accessed Files';
+const USAGE_SECTION_MARKER = '<!-- jam-auto-usage -->';
+
+/**
+ * Update JAM.md with frequently accessed file patterns from the session.
+ * Appends or replaces a "Frequently Accessed Files" section.
+ *
+ * @param workspaceRoot  Workspace root path
+ * @param readFiles      Array of file paths accessed during sessions
+ * @param searchQueries  Array of search queries used during sessions
+ */
+export async function updateContextWithUsage(
+  workspaceRoot: string,
+  readFiles: string[],
+  searchQueries: string[],
+): Promise<void> {
+  const contextPath = join(workspaceRoot, CONTEXT_FILENAME);
+
+  let existing: string;
+  try {
+    existing = await readFile(contextPath, 'utf-8');
+  } catch {
+    return; // No JAM.md — nothing to update
+  }
+
+  // Count file access frequency
+  const fileCounts = new Map<string, number>();
+  for (const f of readFiles) {
+    fileCounts.set(f, (fileCounts.get(f) ?? 0) + 1);
+  }
+
+  // Sort by frequency
+  const topFiles = [...fileCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 15)
+    .map(([path, count]) => `- \`${path}\` (${count}x)`);
+
+  if (topFiles.length === 0) return;
+
+  const usageSection = [
+    '',
+    USAGE_SECTION_HEADER,
+    '',
+    USAGE_SECTION_MARKER,
+    '',
+    '> Auto-updated by Jam based on your usage patterns. These are the files most frequently',
+    '> examined when answering questions. Jam will prioritize searching these locations.',
+    '',
+    ...topFiles,
+    '',
+    ...(searchQueries.length > 0 ? [
+      '### Common Search Patterns',
+      '',
+      ...searchQueries.slice(0, 10).map(q => `- \`${q}\``),
+      '',
+    ] : []),
+    USAGE_SECTION_MARKER,
+    '',
+  ].join('\n');
+
+  // Replace existing usage section or append
+  const markerStart = existing.indexOf(USAGE_SECTION_MARKER);
+  if (markerStart !== -1) {
+    const markerEnd = existing.indexOf(USAGE_SECTION_MARKER, markerStart + USAGE_SECTION_MARKER.length);
+    if (markerEnd !== -1) {
+      // Find the section header before first marker
+      const headerPos = existing.lastIndexOf(USAGE_SECTION_HEADER, markerStart);
+      const sectionStart = headerPos !== -1 ? headerPos : markerStart;
+      const sectionEnd = markerEnd + USAGE_SECTION_MARKER.length;
+      const updated = existing.slice(0, sectionStart) + usageSection + existing.slice(sectionEnd);
+      await writeFile(contextPath, updated, 'utf-8');
+      return;
+    }
+  }
+
+  // Append to end
+  const updated = existing.trimEnd() + '\n' + usageSection;
+  await writeFile(contextPath, updated, 'utf-8');
+}

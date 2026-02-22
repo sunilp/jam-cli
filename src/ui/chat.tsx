@@ -13,9 +13,14 @@ import {
   enrichUserPrompt,
   generateSearchPlan,
   buildSynthesisReminder,
-  validateAnswer,
   buildCorrectionMessage,
 } from '../utils/agent.js';
+import { WorkingMemory } from '../utils/memory.js';
+import { ToolResultCache } from '../utils/cache.js';
+import { criticEvaluate, buildCriticCorrection } from '../utils/critic.js';
+import { searchPastSessions, formatPastExchanges } from '../utils/past-sessions.js';
+import { getOrBuildIndex, searchSymbols, formatSymbolResults } from '../utils/index-builder.js';
+import { updateContextWithUsage } from '../utils/context.js';
 
 export interface ChatOptions {
   provider: ProviderAdapter;
@@ -178,16 +183,34 @@ function ChatApp({
         try {
           const workspaceRoot = await getWorkspaceRoot();
           const { jamContext, workspaceCtx } = await loadProjectContext(workspaceRoot);
-          const toolMessages = [...conversationRef.current];
+          let toolMessages = [...conversationRef.current];
           const tracker = new ToolCallTracker();
+          const memory = new WorkingMemory(provider, profile?.model, undefined);
+          const cache = new ToolResultCache();
 
           agentSystemPrompt =
             profile?.systemPrompt ??
             buildSystemPrompt(jamContext, workspaceCtx);
 
+          memory['systemPrompt'] = agentSystemPrompt;
+
+          // ── Symbol index + past sessions for richer planning ──────────
+          let symbolHint = '';
+          try {
+            const index = await getOrBuildIndex(workspaceRoot);
+            const symbols = searchSymbols(index, trimmed, 10);
+            symbolHint = formatSymbolResults(symbols);
+          } catch { /* non-fatal */ }
+
+          let pastContext = '';
+          try {
+            const pastExchanges = await searchPastSessions(trimmed, workspaceRoot, 2);
+            pastContext = formatPastExchanges(pastExchanges);
+          } catch { /* non-fatal */ }
+
           // ── Planning phase: reason about what to search for ──────────
           setStreamingText('🔍 Planning search strategy…');
-          const projectCtxForPlan = jamContext ?? workspaceCtx;
+          const projectCtxForPlan = [jamContext ?? workspaceCtx, symbolHint, pastContext].filter(Boolean).join('\n\n');
 
           // Get the user's original question (last user message, before enrichment)
           const originalQuestion = trimmed;
@@ -213,6 +236,12 @@ function ChatApp({
           for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
             if (abortController.signal.aborted) break;
 
+            // Context window management: compact if approaching limit
+            if (memory.shouldCompact(toolMessages)) {
+              setStreamingText('⟳ Compacting context…');
+              toolMessages = await memory.compact(toolMessages);
+            }
+
             const response = await provider.chatWithTools(toolMessages, READ_ONLY_TOOL_SCHEMAS, {
               model: profile?.model,
               temperature: profile?.temperature,
@@ -223,17 +252,26 @@ function ChatApp({
             if (!response.toolCalls?.length) {
               const finalText = response.content ?? '';
 
-              // Synthesis grounding: remind model of the original question
+              // Synthesis grounding with critic evaluation
               if (tracker.totalCalls > 0 && !synthesisInjected && round < MAX_TOOL_ROUNDS - 2) {
                 synthesisInjected = true;
 
-                // Check if current answer is already relevant
+                // Critic evaluation of current answer
                 if (finalText.trim().length > 0) {
-                  const validation = validateAnswer(finalText, true, originalQuestion);
-                  if (validation.valid) {
+                  setStreamingText('⟳ Evaluating answer quality…');
+                  const verdict = await criticEvaluate(provider, originalQuestion, finalText, { model: profile?.model });
+                  if (verdict.pass) {
                     conversationRef.current = toolMessages;
+                    // Auto-update JAM.md
+                    const log = memory.getAccessLog();
+                    updateContextWithUsage(workspaceRoot, log.readFiles, log.searchQueries).catch(() => {});
                     break;
                   }
+                  // Critic rejected — use its feedback
+                  setStreamingText(`⟳ Critic: ${verdict.reason}`);
+                  toolMessages.push({ role: 'assistant', content: finalText });
+                  toolMessages.push({ role: 'user', content: buildCriticCorrection(verdict, originalQuestion) });
+                  continue;
                 }
 
                 setStreamingText('⟳ Grounding answer to your question…');
@@ -242,18 +280,21 @@ function ChatApp({
                 continue;
               }
 
-              // Self-validate the answer
-              const validation = validateAnswer(finalText, tracker.totalCalls > 0, originalQuestion);
-
-              if (!validation.valid && round < MAX_TOOL_ROUNDS - 2) {
-                setStreamingText('⟳ Retrying for a better answer…');
-                toolMessages.push({ role: 'assistant', content: finalText });
-                toolMessages.push({ role: 'user', content: buildCorrectionMessage(validation.reason!) });
-                continue;
+              // Final critic check
+              if (tracker.totalCalls > 0 && finalText.trim().length > 30 && round < MAX_TOOL_ROUNDS - 2) {
+                const verdict = await criticEvaluate(provider, originalQuestion, finalText, { model: profile?.model });
+                if (!verdict.pass) {
+                  setStreamingText(`⟳ Critic: ${verdict.reason}`);
+                  toolMessages.push({ role: 'assistant', content: finalText });
+                  toolMessages.push({ role: 'user', content: buildCriticCorrection(verdict, originalQuestion) });
+                  continue;
+                }
               }
 
               // Model has enough context — let streaming use the enriched history
               conversationRef.current = toolMessages;
+              const log = memory.getAccessLog();
+              updateContextWithUsage(workspaceRoot, log.readFiles, log.searchQueries).catch(() => {});
               break;
             }
 
@@ -273,6 +314,16 @@ function ChatApp({
                 continue;
               }
 
+              // Check cache
+              const cached = cache.get(tc.name, tc.arguments);
+              if (cached !== null) {
+                setStreamingText(`⚙ ${tc.name} (cached)`);
+                const capped = memory.processToolResult(tc.name, tc.arguments, cached);
+                toolMessages.push({ role: 'user', content: `[Tool result: ${tc.name}]\n${capped}` });
+                tracker.record(tc.name, tc.arguments, false);
+                continue;
+              }
+
               setStreamingText(`⚙ ${tc.name}(${Object.entries(tc.arguments).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ')})`);
               let toolOutput: string;
               let wasError = false;
@@ -282,8 +333,18 @@ function ChatApp({
                 toolOutput = `Tool error: ${err instanceof Error ? err.message : String(err)}`;
                 wasError = true;
               }
+
+              if (!wasError) cache.set(tc.name, tc.arguments, toolOutput);
+              const cappedOutput = memory.processToolResult(tc.name, tc.arguments, toolOutput);
+
               tracker.record(tc.name, tc.arguments, wasError);
-              toolMessages.push({ role: 'user', content: `[Tool result: ${tc.name}]\n${toolOutput}` });
+              toolMessages.push({ role: 'user', content: `[Tool result: ${tc.name}]\n${cappedOutput}` });
+            }
+
+            // Scratchpad checkpoint
+            if (memory.shouldScratchpad(round)) {
+              setStreamingText('📝 Working memory checkpoint…');
+              toolMessages.push(memory.scratchpadPrompt());
             }
 
             // Inject correction hints if stuck
