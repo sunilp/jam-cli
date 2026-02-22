@@ -21,6 +21,8 @@ import {
   formatRetry,
   formatHintInjection,
   formatUsage,
+  formatPlanBlock,
+  formatInternalStatus,
 } from '../utils/agent.js';
 import { WorkingMemory } from '../utils/memory.js';
 import { ToolResultCache } from '../utils/cache.js';
@@ -173,9 +175,9 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
       });
 
       if (searchPlan) {
-        process.stderr.write(searchPlan + '\n');
+        process.stderr.write(formatPlanBlock(searchPlan, noColor) + '\n');
       } else {
-        process.stderr.write('  (planning skipped — using generic search strategy)\n');
+        process.stderr.write(formatInternalStatus('planning skipped — using generic search strategy', noColor) + '\n');
       }
 
       // Enrich the user's prompt with the search plan
@@ -190,7 +192,7 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
       for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
         // ── Context window management: compact if approaching limit ───────
         if (memory.shouldCompact(messages)) {
-          process.stderr.write(formatRetry('Compacting context…', noColor) + '\n');
+          process.stderr.write(formatInternalStatus('Compacting context…', noColor) + '\n');
           messages = await memory.compact(messages);
         }
 
@@ -211,7 +213,7 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
 
             // If the model already produced an answer, run critic evaluation
             if (finalText.trim().length > 0) {
-              process.stderr.write(formatRetry('Evaluating answer quality…', noColor) + '\n');
+              process.stderr.write(formatInternalStatus('Evaluating answer quality…', noColor) + '\n');
               const verdict = await criticEvaluate(adapter, prompt, finalText, { model: profile.model });
               if (verdict.pass) {
                 process.stderr.write(formatSeparator('Answer', noColor));
@@ -222,14 +224,14 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
                 return;
               }
               // Critic rejected — use its specific feedback
-              process.stderr.write(formatRetry(`Critic: ${verdict.reason}`, noColor) + '\n');
+              process.stderr.write(formatInternalStatus(`Critic: ${verdict.reason}`, noColor) + '\n');
               messages.push({ role: 'assistant', content: finalText });
               messages.push({ role: 'user', content: buildCriticCorrection(verdict, prompt) });
               continue;
             }
 
             // No answer yet — inject synthesis reminder
-            process.stderr.write(formatRetry('Grounding answer to your question…', noColor) + '\n');
+            process.stderr.write(formatInternalStatus('Grounding answer to your question…', noColor) + '\n');
             messages.push({ role: 'assistant', content: finalText });
             messages.push({ role: 'user', content: buildSynthesisReminder(prompt) });
             continue;
@@ -239,7 +241,7 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
           if (tracker.totalCalls > 0 && finalText.trim().length > 30 && round < MAX_TOOL_ROUNDS - 2) {
             const verdict = await criticEvaluate(adapter, prompt, finalText, { model: profile.model });
             if (!verdict.pass) {
-              process.stderr.write(formatRetry(`Critic: ${verdict.reason}`, noColor) + '\n');
+              process.stderr.write(formatInternalStatus(`Critic: ${verdict.reason}`, noColor) + '\n');
               messages.push({ role: 'assistant', content: finalText });
               messages.push({ role: 'user', content: buildCriticCorrection(verdict, prompt) });
               continue;
@@ -304,7 +306,7 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
 
         // ── Scratchpad: periodic working memory checkpoint ─────────────────
         if (memory.shouldScratchpad(round)) {
-          process.stderr.write(formatRetry('Working memory checkpoint…', noColor) + '\n');
+          process.stderr.write(formatInternalStatus('Working memory checkpoint…', noColor) + '\n');
           messages.push(memory.scratchpadPrompt());
         }
 

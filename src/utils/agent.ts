@@ -24,6 +24,7 @@ export const ANSI = {
   reset:   '\x1b[0m',
   dim:     '\x1b[2m',
   bold:    '\x1b[1m',
+  italic:  '\x1b[3m',
   cyan:    '\x1b[36m',
   yellow:  '\x1b[33m',
   green:   '\x1b[32m',
@@ -32,6 +33,13 @@ export const ANSI = {
   white:   '\x1b[37m',
   blue:    '\x1b[34m',
   red:     '\x1b[31m',
+  // Dim variants for subtle output
+  dimBlue:    '\x1b[2m\x1b[34m',
+  dimCyan:    '\x1b[2m\x1b[36m',
+  dimGreen:   '\x1b[2m\x1b[32m',
+  dimYellow:  '\x1b[2m\x1b[33m',
+  dimMagenta: '\x1b[2m\x1b[35m',
+  dimGray:    '\x1b[2m\x1b[90m',
 } as const;
 
 export function ansi(code: string, text: string): string {
@@ -484,62 +492,84 @@ export function buildCorrectionMessage(reason: string): string {
 
 // ── Formatting helpers ────────────────────────────────────────────────────────
 
-/** Format a tool call for display. */
-export function formatToolCall(name: string, args: Record<string, unknown>, noColor: boolean): string {
+/**
+ * Format the search plan text as a visually distinct block.
+ * Uses dim blue with a left-border character (│) to set it apart from tool output.
+ */
+export function formatPlanBlock(planText: string, noColor: boolean): string {
+  const lines = planText.split('\n');
   if (noColor) {
-    return `  ▸ ${name}(${Object.entries(args).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ')})`;
+    return lines.map(l => `  │ ${l}`).join('\n');
   }
-  const formattedArgs = Object.entries(args)
-    .map(([k, v]) => `${ansi(ANSI.white, k)}${ansi(ANSI.gray, '=')}${ansi(ANSI.yellow, JSON.stringify(v))}`)
-    .join(ansi(ANSI.gray, ', '));
-  return `  ${ansi(ANSI.cyan, '▸')} ${ansi(ANSI.bold + ANSI.cyan, name)}${ansi(ANSI.gray, '(')}${formattedArgs}${ansi(ANSI.gray, ')')}`;
+  return lines
+    .map(l => `  ${ansi(ANSI.dimBlue, '│')} ${ansi(ANSI.dimBlue, l)}`)
+    .join('\n');
 }
 
-/** Format a tool result summary for display. */
+/** Format an internal status message (compaction, critic, scratchpad, etc). Very dim. */
+export function formatInternalStatus(message: string, noColor: boolean): string {
+  if (noColor) {
+    return `    · ${message}`;
+  }
+  return `    ${ansi(ANSI.dimGray, '·')} ${ansi(ANSI.dimGray + ANSI.italic, message)}`;
+}
+
+/** Format a tool call for display — dim cyan to stay visually secondary. */
+export function formatToolCall(name: string, args: Record<string, unknown>, noColor: boolean): string {
+  if (noColor) {
+    return `    ▸ ${name}(${Object.entries(args).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ')})`;
+  }
+  const formattedArgs = Object.entries(args)
+    .map(([k, v]) => `${ansi(ANSI.gray, k)}${ansi(ANSI.dimGray, '=')}${ansi(ANSI.dimYellow, JSON.stringify(v))}`)
+    .join(ansi(ANSI.dimGray, ', '));
+  return `    ${ansi(ANSI.dimCyan, '▸')} ${ansi(ANSI.dimCyan, name)}${ansi(ANSI.dimGray, '(')}${formattedArgs}${ansi(ANSI.dimGray, ')')}`;
+}
+
+/** Format a tool result summary for display — very dim, background-level. */
 export function formatToolResult(output: string, noColor: boolean): string {
   const maxLen = 200;
   const preview = output.replace(/\n/g, ' ↵ ').slice(0, maxLen);
   const truncated = output.length > maxLen ? '…' : '';
   if (noColor) {
-    return `    → ${preview}${truncated}`;
+    return `      → ${preview}${truncated}`;
   }
-  return `    ${ansi(ANSI.green, '→')} ${ansi(ANSI.dim, preview + truncated)}`;
+  return `      ${ansi(ANSI.dimGreen, '→')} ${ansi(ANSI.dimGray, preview + truncated)}`;
 }
 
-/** Print a section separator. */
+/** Print a section separator — bold accent to clearly demarcate phases. */
 export function formatSeparator(label: string, noColor: boolean): string {
   const line = '─'.repeat(Math.max(0, 60 - label.length - 2));
   if (noColor) {
     return `\n── ${label} ${line}\n`;
   }
-  return `\n${ansi(ANSI.dim, '── ')}${ansi(ANSI.bold + ANSI.magenta, label)} ${ansi(ANSI.dim, line)}\n`;
+  return `\n${ansi(ANSI.dim, '──')} ${ansi(ANSI.bold + ANSI.magenta, label)} ${ansi(ANSI.dim, line)}\n`;
 }
 
-/** Format a duplicate skip message. */
+/** Format a duplicate skip message — dim red. */
 export function formatDuplicateSkip(name: string, noColor: boolean): string {
   if (noColor) {
-    return `  ✕ skipped duplicate: ${name}`;
+    return `    ✕ skipped duplicate: ${name}`;
   }
-  return `  ${ansi(ANSI.red, '✕')} ${ansi(ANSI.dim, `skipped duplicate: ${name}`)}`;
+  return `    ${ansi(ANSI.dim + ANSI.red, '✕')} ${ansi(ANSI.dimGray, `skipped duplicate: ${name}`)}`;
 }
 
-/** Format a retry/validation message. */
+/** Format a retry/validation message — dim yellow, secondary prominence. */
 export function formatRetry(message: string, noColor: boolean): string {
   if (noColor) {
-    return `  ⟳ ${message}`;
+    return `    ⟳ ${message}`;
   }
-  return `  ${ansi(ANSI.yellow, '⟳')} ${ansi(ANSI.dim, message)}`;
+  return `    ${ansi(ANSI.dimYellow, '⟳')} ${ansi(ANSI.dimGray + ANSI.italic, message)}`;
 }
 
 /** Format a correction hint injection message. */
 export function formatHintInjection(noColor: boolean): string {
   if (noColor) {
-    return `  ⚠ injecting search guidance…`;
+    return `    ⚠ injecting search guidance…`;
   }
-  return `  ${ansi(ANSI.yellow, '⚠')} ${ansi(ANSI.dim, 'injecting search guidance…')}`;
+  return `    ${ansi(ANSI.dimYellow, '⚠')} ${ansi(ANSI.dimGray + ANSI.italic, 'injecting search guidance…')}`;
 }
 
-/** Format usage stats. */
+/** Format usage stats — small dim footer. */
 export function formatUsage(
   promptTokens: number,
   completionTokens: number,
@@ -547,5 +577,5 @@ export function formatUsage(
   noColor: boolean,
 ): string {
   const str = `tokens: ${promptTokens} prompt + ${completionTokens} completion = ${totalTokens} total`;
-  return noColor ? str : ansi(ANSI.dim, str);
+  return noColor ? str : ansi(ANSI.dimGray, str);
 }
