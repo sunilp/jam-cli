@@ -1,0 +1,9 @@
+# Thank you for contributing to Jam CLI! 🎉
+#
+# Please see CONTRIBUTING.md for detailed guidelines.
+#
+# Quick checklist:
+# - [ ] Tests pass (npm test)
+# - [ ] Types check (npm run typecheck)
+# - [ ] Lint passes (npm run lint)
+# - [ ] Commit messages follow Conventional Commits

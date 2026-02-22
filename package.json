@@ -1,0 +1,78 @@
+{
+  "name": "jam-cli",
+  "version": "0.1.0",
+  "description": "Jam — developer-first AI assistant CLI for the terminal. Ask questions, explain code, review diffs, generate patches, and run agentic tasks powered by Ollama.",
+  "type": "module",
+  "license": "MIT",
+  "author": {
+    "name": "Sunil Prakash",
+    "email": "prakashsunil@proton.me",
+    "url": "https://github.com/sunilp"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sunilp/jam-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sunilp/jam-cli/issues"
+  },
+  "homepage": "https://github.com/sunilp/jam-cli#readme",
+  "keywords": [
+    "ai",
+    "cli",
+    "assistant",
+    "terminal",
+    "ollama",
+    "llm",
+    "developer-tools",
+    "code-review",
+    "agentic",
+    "streaming",
+    "chat",
+    "patch"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "jam": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.build.json",
+    "dev": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts,.tsx",
+    "format": "prettier --write \"src/**/*.{ts,tsx}\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "cosmiconfig": "^9.0.0",
+    "ink": "^5.0.1",
+    "ink-text-input": "^6.0.0",
+    "keytar": "^7.9.0",
+    "marked": "^12.0.0",
+    "marked-terminal": "^7.1.0",
+    "react": "^18.3.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.3",
+    "@typescript-eslint/eslint-plugin": "^7.14.1",
+    "@typescript-eslint/parser": "^7.14.1",
+    "@vitest/coverage-v8": "^1.6.0",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "msw": "^2.3.1",
+    "prettier": "^3.3.2",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.2",
+    "undici": "^6.19.2",
+    "vitest": "^1.6.0"
+  }
+}

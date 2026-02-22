@@ -1,0 +1,25 @@
+# Source
+src/
+tsconfig.json
+tsconfig.build.json
+tsconfig.eslint.json
+vitest.config.ts
+.editorconfig
+.eslintrc*
+.prettierrc*
+
+# Dev & CI
+.github/
+coverage/
+*.log
+.env*
+
+# Docs (keep README & LICENSE)
+CONTRIBUTING.md
+CODE_OF_CONDUCT.md
+SECURITY.md
+CHANGELOG.md
+
+# OS
+.DS_Store
+Thumbs.db
