@@ -307,6 +307,26 @@ completion
     runCompletionInstall({ shell: opts.shell });
   });
 
+// ── context ───────────────────────────────────────────────────────────────────
+const context = program.command('context').description('Manage the JAM.md project context file');
+
+context
+  .command('init')
+  .description('Generate a JAM.md file with auto-discovered project context')
+  .option('--force', 'overwrite existing JAM.md')
+  .action(async (opts: { force?: boolean }) => {
+    const { runContextInit } = await import('./commands/context.js');
+    await runContextInit({ force: opts.force });
+  });
+
+context
+  .command('show')
+  .description('Display the current JAM.md contents')
+  .action(async () => {
+    const { runContextShow } = await import('./commands/context.js');
+    await runContextShow();
+  });
+
 // ── doctor ────────────────────────────────────────────────────────────────────
 program
   .command('doctor')

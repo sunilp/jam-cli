@@ -6,6 +6,14 @@ import type { JamConfig } from '../config/schema.js';
 import { appendMessage } from '../storage/history.js';
 import { READ_ONLY_TOOL_SCHEMAS, executeReadOnlyTool } from '../tools/context-tools.js';
 import { getWorkspaceRoot } from '../utils/workspace.js';
+import {
+  ToolCallTracker,
+  loadProjectContext,
+  buildSystemPrompt,
+  enrichUserPrompt,
+  validateAnswer,
+  buildCorrectionMessage,
+} from '../utils/agent.js';
 
 export interface ChatOptions {
   provider: ProviderAdapter;
@@ -164,13 +172,24 @@ function ChatApp({
       if (provider.chatWithTools && !abortController.signal.aborted) {
         try {
           const workspaceRoot = await getWorkspaceRoot();
+          const { jamContext, workspaceCtx } = await loadProjectContext(workspaceRoot);
           const toolMessages = [...conversationRef.current];
+          const tracker = new ToolCallTracker();
+
           const toolSystemPrompt =
             profile?.systemPrompt ??
-            'You are a helpful developer assistant with read-only access to the local codebase via tools. ' +
-            'Use list_dir, search_text, and read_file to find and read relevant files before answering.';
+            buildSystemPrompt(jamContext, workspaceCtx);
 
-          const MAX_TOOL_ROUNDS = 8;
+          // Enrich the last user message with search guidance
+          const lastMsg = toolMessages[toolMessages.length - 1];
+          if (lastMsg && lastMsg.role === 'user') {
+            toolMessages[toolMessages.length - 1] = {
+              ...lastMsg,
+              content: enrichUserPrompt(lastMsg.content),
+            };
+          }
+
+          const MAX_TOOL_ROUNDS = 15;
           for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
             if (abortController.signal.aborted) break;
 
@@ -182,6 +201,17 @@ function ChatApp({
             });
 
             if (!response.toolCalls?.length) {
+              // Self-validate the answer
+              const finalText = response.content ?? '';
+              const validation = validateAnswer(finalText, tracker.totalCalls > 0);
+
+              if (!validation.valid && round < MAX_TOOL_ROUNDS - 2) {
+                setStreamingText('⟳ Retrying for a better answer…');
+                toolMessages.push({ role: 'assistant', content: finalText });
+                toolMessages.push({ role: 'user', content: buildCorrectionMessage(validation.reason!) });
+                continue;
+              }
+
               // Model has enough context — let streaming use the enriched history
               conversationRef.current = toolMessages;
               break;
@@ -191,15 +221,38 @@ function ChatApp({
 
             for (const tc of response.toolCalls) {
               if (abortController.signal.aborted) break;
-              setStreamingText(`⚙ ${tc.name}(${JSON.stringify(tc.arguments)})`);
+
+              // Duplicate detection
+              if (tracker.isDuplicate(tc.name, tc.arguments)) {
+                setStreamingText(`✕ skipped duplicate: ${tc.name}`);
+                toolMessages.push({
+                  role: 'user',
+                  content: `[Tool result: ${tc.name}]\nYou already made this exact call. Try a DIFFERENT query or tool.`,
+                });
+                tracker.record(tc.name, tc.arguments, true);
+                continue;
+              }
+
+              setStreamingText(`⚙ ${tc.name}(${Object.entries(tc.arguments).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ')})`);
               let toolOutput: string;
+              let wasError = false;
               try {
                 toolOutput = await executeReadOnlyTool(tc.name, tc.arguments, workspaceRoot);
               } catch (err) {
                 toolOutput = `Tool error: ${err instanceof Error ? err.message : String(err)}`;
+                wasError = true;
               }
+              tracker.record(tc.name, tc.arguments, wasError);
               toolMessages.push({ role: 'user', content: `[Tool result: ${tc.name}]\n${toolOutput}` });
             }
+
+            // Inject correction hints if stuck
+            const hint = tracker.getCorrectionHint();
+            if (hint) {
+              setStreamingText('⚠ Adjusting search strategy…');
+              toolMessages.push({ role: 'user', content: hint });
+            }
+
             conversationRef.current = toolMessages;
           }
         } catch {

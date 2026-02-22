@@ -2,10 +2,25 @@ import { readFile } from 'node:fs/promises';
 import { loadConfig, getActiveProfile } from '../config/loader.js';
 import { createProvider } from '../providers/factory.js';
 import { withRetry, collectStream } from '../utils/stream.js';
-import { streamToStdout, printJsonResult, printError } from '../ui/renderer.js';
+import { streamToStdout, printJsonResult, printError, renderMarkdown } from '../ui/renderer.js';
 import { JamError } from '../utils/errors.js';
 import { getWorkspaceRoot } from '../utils/workspace.js';
 import { READ_ONLY_TOOL_SCHEMAS, executeReadOnlyTool } from '../tools/context-tools.js';
+import {
+  ToolCallTracker,
+  loadProjectContext,
+  buildSystemPrompt,
+  enrichUserPrompt,
+  validateAnswer,
+  buildCorrectionMessage,
+  formatToolCall,
+  formatToolResult,
+  formatSeparator,
+  formatDuplicateSkip,
+  formatRetry,
+  formatHintInjection,
+  formatUsage,
+} from '../utils/agent.js';
 import type { CliOverrides } from '../config/schema.js';
 import type { Message } from '../providers/base.js';
 
@@ -80,25 +95,32 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
     const adapter = await createProvider(profile);
 
     // ── Agentic context-gathering phase ───────────────────────────────────────
-    // When the provider supports tool calling and tools are not explicitly
-    // disabled, let the model read/search files before giving its final answer.
     const useTools =
       options.tools !== false &&
       typeof adapter.chatWithTools === 'function';
 
+    // Build workspace context for better model reasoning
+    const workspaceRoot = useTools ? await getWorkspaceRoot() : '';
+    const { jamContext, workspaceCtx } = useTools
+      ? await loadProjectContext(workspaceRoot)
+      : { jamContext: null, workspaceCtx: '' };
+
     const systemPrompt =
       options.system ??
       profile.systemPrompt ??
-      (useTools
-        ? 'You are a helpful developer assistant. You have read-only access to the ' +
-          'local codebase via tools. Use them to find and read relevant files before ' +
-          'answering. When you have gathered enough context, reply directly to the user.'
-        : undefined);
+      (useTools ? buildSystemPrompt(jamContext, workspaceCtx) : undefined);
 
     if (useTools && adapter.chatWithTools) {
-      const workspaceRoot = await getWorkspaceRoot();
-      const messages: Message[] = [{ role: 'user', content: prompt }];
-      const MAX_TOOL_ROUNDS = 8;
+      const noColor = options.noColor ?? false;
+      const tracker = new ToolCallTracker();
+
+      // Enrich the user's prompt with search guidance
+      const enrichedPrompt = enrichUserPrompt(prompt);
+      const messages: Message[] = [{ role: 'user', content: enrichedPrompt }];
+
+      const MAX_TOOL_ROUNDS = 15;
+
+      process.stderr.write(formatSeparator('Searching codebase', noColor));
 
       for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
         const response = await adapter.chatWithTools(messages, READ_ONLY_TOOL_SCHEMAS, {
@@ -108,35 +130,82 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
           systemPrompt,
         });
 
-        // No tool calls → model is ready to answer; collect final text
+        // No tool calls → model is ready to answer
         if (!response.toolCalls || response.toolCalls.length === 0) {
           const finalText = response.content ?? '';
+
+          // ── Self-validation: check if the answer looks like garbage ──
+          const validation = validateAnswer(finalText, tracker.totalCalls > 0);
+
+          if (!validation.valid && round < MAX_TOOL_ROUNDS - 2) {
+            process.stderr.write(formatRetry('Answer quality check failed, retrying…', noColor) + '\n');
+            messages.push({ role: 'assistant', content: finalText });
+            messages.push({ role: 'user', content: buildCorrectionMessage(validation.reason!) });
+            continue;
+          }
+
+          process.stderr.write(formatSeparator('Answer', noColor));
+
           if (options.json) {
             printJsonResult({ response: finalText, usage: response.usage, model: profile.model });
           } else {
-            process.stdout.write(finalText + '\n');
+            try {
+              const rendered = await renderMarkdown(finalText);
+              process.stdout.write(rendered);
+            } catch {
+              process.stdout.write(finalText + '\n');
+            }
+          }
+
+          if (response.usage && !options.json) {
+            const u = response.usage;
+            process.stderr.write(`\n${formatUsage(u.promptTokens, u.completionTokens, u.totalTokens, noColor)}\n`);
           }
           return;
         }
 
-        // Add the assistant's (possibly empty) message to history
+        // ── Execute tool calls ────────────────────────────────────────────────
         messages.push({ role: 'assistant', content: response.content ?? '' });
 
-        // Execute each tool call and feed results back
         for (const tc of response.toolCalls) {
-          process.stderr.write(`[tool: ${tc.name}(${JSON.stringify(tc.arguments)})]\n`);
+          // Duplicate detection — skip and inject guidance
+          if (tracker.isDuplicate(tc.name, tc.arguments)) {
+            process.stderr.write(formatDuplicateSkip(tc.name, noColor) + '\n');
+            messages.push({
+              role: 'user',
+              content: `[Tool result: ${tc.name}]\nYou already made this exact call. The result was the same as before. Try a DIFFERENT search query or tool.`,
+            });
+            tracker.record(tc.name, tc.arguments, true);
+            continue;
+          }
+
+          process.stderr.write(formatToolCall(tc.name, tc.arguments, noColor) + '\n');
+
           let toolOutput: string;
+          let wasError = false;
           try {
             toolOutput = await executeReadOnlyTool(tc.name, tc.arguments, workspaceRoot);
           } catch (err) {
             toolOutput = `Tool error: ${JamError.fromUnknown(err).message}`;
+            wasError = true;
           }
-          process.stderr.write(`[result: ${toolOutput.slice(0, 120)}${toolOutput.length > 120 ? '…' : ''}]\n`);
+
+          process.stderr.write(formatToolResult(toolOutput, noColor) + '\n');
+          tracker.record(tc.name, tc.arguments, wasError);
+
           messages.push({ role: 'user', content: `[Tool result: ${tc.name}]\n${toolOutput}` });
+        }
+
+        // ── Inject correction hints if stuck ──────────────────────────────────
+        const hint = tracker.getCorrectionHint();
+        if (hint) {
+          process.stderr.write(formatHintInjection(noColor) + '\n');
+          messages.push({ role: 'user', content: hint });
         }
       }
 
-      // Exceeded round limit — fall through to streaming with accumulated context
+      // Exceeded round limit — fall through to streaming
+      process.stderr.write(formatSeparator('Max tool rounds reached, generating answer', noColor));
     }
 
     // ── Standard streaming response ───────────────────────────────────────────
