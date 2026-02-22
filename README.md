@@ -106,8 +106,15 @@ Most AI coding tools are built around a single vendor's model, require a browser
 ### Install
 
 ```bash
-# Global install (once published to npm)
-npm install -g jam-cli
+# Try instantly — no install required
+npx @sunilp-org/jam-cli doctor
+
+# Global install from npm
+npm install -g @sunilp-org/jam-cli
+
+# Homebrew (macOS / Linux)
+brew tap sunilp/tap
+brew install jam-cli
 
 # Or run from source
 git clone https://github.com/sunilp/jam-cli.git
