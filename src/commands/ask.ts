@@ -5,8 +5,9 @@ import { withRetry, collectStream } from '../utils/stream.js';
 import { streamToStdout, printJsonResult, printError } from '../ui/renderer.js';
 import { JamError } from '../utils/errors.js';
 import { getWorkspaceRoot } from '../utils/workspace.js';
+import { READ_ONLY_TOOL_SCHEMAS, executeReadOnlyTool } from '../tools/context-tools.js';
 import type { CliOverrides } from '../config/schema.js';
-import type { Message, ToolDefinition } from '../providers/base.js';
+import type { Message } from '../providers/base.js';
 
 export interface AskOptions extends CliOverrides {
   file?: string;
@@ -17,48 +18,6 @@ export interface AskOptions extends CliOverrides {
    *  Defaults to true when stdout is a TTY and the provider supports chatWithTools. */
   tools?: boolean;
 }
-
-// ── Read-only tool schemas exposed to the model ───────────────────────────────
-
-const READ_ONLY_TOOLS: ToolDefinition[] = [
-  {
-    name: 'read_file',
-    description: 'Read the contents of a file in the workspace',
-    parameters: {
-      type: 'object',
-      properties: {
-        path: { type: 'string', description: 'File path relative to workspace root' },
-        start_line: { type: 'number', description: 'First line to read (1-based, optional)' },
-        end_line: { type: 'number', description: 'Last line to read (inclusive, optional)' },
-      },
-      required: ['path'],
-    },
-  },
-  {
-    name: 'list_dir',
-    description: 'List files and sub-directories at a path in the workspace',
-    parameters: {
-      type: 'object',
-      properties: {
-        path: { type: 'string', description: 'Directory path relative to workspace root (default: ".")' },
-      },
-      required: [],
-    },
-  },
-  {
-    name: 'search_text',
-    description: 'Search for text patterns in the codebase using ripgrep',
-    parameters: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: 'Search query (regex supported)' },
-        glob: { type: 'string', description: 'File glob to restrict search (e.g. "*.ts")' },
-        max_results: { type: 'number', description: 'Maximum number of results (default 20)' },
-      },
-      required: ['query'],
-    },
-  },
-];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -138,14 +97,11 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
 
     if (useTools && adapter.chatWithTools) {
       const workspaceRoot = await getWorkspaceRoot();
-      const { createDefaultRegistry } = await import('../tools/registry.js');
-      const registry = createDefaultRegistry();
-
       const messages: Message[] = [{ role: 'user', content: prompt }];
       const MAX_TOOL_ROUNDS = 8;
 
       for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-        const response = await adapter.chatWithTools(messages, READ_ONLY_TOOLS, {
+        const response = await adapter.chatWithTools(messages, READ_ONLY_TOOL_SCHEMAS, {
           model: profile.model,
           temperature: profile.temperature,
           maxTokens: profile.maxTokens,
@@ -171,13 +127,7 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
           process.stderr.write(`[tool: ${tc.name}(${JSON.stringify(tc.arguments)})]\n`);
           let toolOutput: string;
           try {
-            const tool = registry.get(tc.name);
-            if (!tool) throw new JamError(`Unknown tool: ${tc.name}`, 'TOOL_NOT_FOUND');
-            const result = await tool.execute(tc.arguments, {
-              workspaceRoot,
-              cwd: process.cwd(),
-            });
-            toolOutput = result.error ? `Error: ${result.error}` : result.output;
+            toolOutput = await executeReadOnlyTool(tc.name, tc.arguments, workspaceRoot);
           } catch (err) {
             toolOutput = `Tool error: ${JamError.fromUnknown(err).message}`;
           }
@@ -186,11 +136,7 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
         }
       }
 
-      // Exceeded round limit — do a final non-tool call
-      messages.push({
-        role: 'user',
-        content: 'You have used the maximum number of tool calls. Please answer now based on what you have gathered.',
-      });
+      // Exceeded round limit — fall through to streaming with accumulated context
     }
 
     // ── Standard streaming response ───────────────────────────────────────────

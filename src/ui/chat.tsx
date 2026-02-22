@@ -4,6 +4,8 @@ import TextInput from 'ink-text-input';
 import type { ProviderAdapter, Message } from '../providers/base.js';
 import type { JamConfig } from '../config/schema.js';
 import { appendMessage } from '../storage/history.js';
+import { READ_ONLY_TOOL_SCHEMAS, executeReadOnlyTool } from '../tools/context-tools.js';
+import { getWorkspaceRoot } from '../utils/workspace.js';
 
 export interface ChatOptions {
   provider: ProviderAdapter;
@@ -157,6 +159,54 @@ function ChatApp({
       const abortController = new AbortController();
       abortRef.current = abortController;
 
+      // ── Agentic tool-gathering phase ─────────────────────────────────────
+      // Run read-only tool rounds to gather context before giving final answer.
+      if (provider.chatWithTools && !abortController.signal.aborted) {
+        try {
+          const workspaceRoot = await getWorkspaceRoot();
+          const toolMessages = [...conversationRef.current];
+          const toolSystemPrompt =
+            profile?.systemPrompt ??
+            'You are a helpful developer assistant with read-only access to the local codebase via tools. ' +
+            'Use list_dir, search_text, and read_file to find and read relevant files before answering.';
+
+          const MAX_TOOL_ROUNDS = 8;
+          for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+            if (abortController.signal.aborted) break;
+
+            const response = await provider.chatWithTools(toolMessages, READ_ONLY_TOOL_SCHEMAS, {
+              model: profile?.model,
+              temperature: profile?.temperature,
+              maxTokens: profile?.maxTokens,
+              systemPrompt: toolSystemPrompt,
+            });
+
+            if (!response.toolCalls?.length) {
+              // Model has enough context — let streaming use the enriched history
+              conversationRef.current = toolMessages;
+              break;
+            }
+
+            toolMessages.push({ role: 'assistant', content: response.content ?? '' });
+
+            for (const tc of response.toolCalls) {
+              if (abortController.signal.aborted) break;
+              setStreamingText(`⚙ ${tc.name}(${JSON.stringify(tc.arguments)})`);
+              let toolOutput: string;
+              try {
+                toolOutput = await executeReadOnlyTool(tc.name, tc.arguments, workspaceRoot);
+              } catch (err) {
+                toolOutput = `Tool error: ${err instanceof Error ? err.message : String(err)}`;
+              }
+              toolMessages.push({ role: 'user', content: `[Tool result: ${tc.name}]\n${toolOutput}` });
+            }
+            conversationRef.current = toolMessages;
+          }
+        } catch {
+          // Tool loop error is non-fatal; proceed with streaming
+        }
+        setStreamingText('');
+      }
       let fullResponse = '';
       let interrupted = false;
 
