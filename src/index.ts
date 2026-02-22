@@ -157,6 +157,27 @@ program
     });
   });
 
+// ── commit ────────────────────────────────────────────────────────────────────
+program
+  .command('commit')
+  .description('Generate an AI commit message from staged changes and commit')
+  .option('--dry', 'generate the message but do not commit')
+  .option('--yes', 'auto-confirm without prompting')
+  .option('--amend', 'amend the last commit with a new AI-generated message')
+  .action(async (cmdOpts: Record<string, unknown>) => {
+    const g = globalOpts();
+    const { runCommit } = await import('./commands/commit.js');
+    await runCommit({
+      profile: g.profile,
+      provider: g.provider,
+      model: g.model,
+      baseUrl: g.baseUrl,
+      dry: cmdOpts['dry'] as boolean | undefined,
+      yes: cmdOpts['yes'] as boolean | undefined,
+      amend: cmdOpts['amend'] as boolean | undefined,
+    });
+  });
+
 // ── patch ─────────────────────────────────────────────────────────────────────
 program
   .command('patch [instruction]')
