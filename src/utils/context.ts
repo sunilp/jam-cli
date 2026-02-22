@@ -10,8 +10,8 @@
  * conventions, architectural decisions, etc.
  */
 
-import { readFile, writeFile, readdir, access, constants, stat } from 'node:fs/promises';
-import { basename, join, extname } from 'node:path';
+import { readFile, writeFile, readdir, access, constants } from 'node:fs/promises';
+import { basename, join } from 'node:path';
 import type { Dirent } from 'node:fs';
 
 export const CONTEXT_FILENAME = 'JAM.md';

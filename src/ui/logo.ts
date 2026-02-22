@@ -61,6 +61,7 @@ function buildPlain(): string {
 
 // Strip ANSI escape codes to get the visible (printable) length of a string.
 const visibleLength = (s: string): number =>
+  // eslint-disable-next-line no-control-regex
   s.replace(/\x1b\[[0-9;]*m/g, '').length;
 
 function buildColored(): string {

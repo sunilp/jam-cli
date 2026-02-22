@@ -12,12 +12,10 @@ import {
   enrichUserPrompt,
   generateSearchPlan,
   buildSynthesisReminder,
-  buildCorrectionMessage,
   formatToolCall,
   formatToolResult,
   formatSeparator,
   formatDuplicateSkip,
-  formatRetry,
   formatHintInjection,
   formatUsage,
   formatPlanBlock,
@@ -29,7 +27,7 @@ import { criticEvaluate, buildCriticCorrection } from '../utils/critic.js';
 import { searchPastSessions, formatPastExchanges } from '../utils/past-sessions.js';
 import { getOrBuildIndex, searchSymbols, formatSymbolResults } from '../utils/index-builder.js';
 import { updateContextWithUsage } from '../utils/context.js';
-import type { CliOverrides, ToolPolicy } from '../config/schema.js';
+import type { CliOverrides } from '../config/schema.js';
 import type { Message } from '../providers/base.js';
 
 export interface RunOptions extends CliOverrides {

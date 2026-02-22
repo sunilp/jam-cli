@@ -118,7 +118,7 @@ function parseCriticResponse(text: string): CriticVerdict {
   const confLine = lines.find(l => l.toUpperCase().startsWith('CONFIDENCE'));
   if (confLine) {
     const match = confLine.match(/[\d.]+/);
-    if (match) confidence = Math.min(1, Math.max(0, parseFloat(match[0]!)));
+    if (match) confidence = Math.min(1, Math.max(0, parseFloat(match[0])));
   }
 
   // Extract reason

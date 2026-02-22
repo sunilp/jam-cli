@@ -15,7 +15,6 @@ import {
   enrichUserPrompt,
   generateSearchPlan,
   buildSynthesisReminder,
-  buildCorrectionMessage,
 } from '../utils/agent.js';
 import { WorkingMemory } from '../utils/memory.js';
 import { ToolResultCache } from '../utils/cache.js';

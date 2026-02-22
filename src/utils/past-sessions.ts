@@ -7,7 +7,7 @@
  */
 
 import { listSessions, getSession } from '../storage/history.js';
-import type { SessionDetail, StoredMessage } from '../storage/history.js';
+import type { SessionDetail } from '../storage/history.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

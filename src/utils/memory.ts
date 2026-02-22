@@ -16,8 +16,6 @@
 import type { Message } from '../providers/base.js';
 import type { ProviderAdapter } from '../providers/base.js';
 import {
-  estimateMessageTokens,
-  estimateTokens,
   checkBudget,
   truncateToolOutput,
 } from './tokens.js';
@@ -34,7 +32,7 @@ const COMPACTION_THRESHOLD = 0.70;
 export const MAX_TOOL_RESULT_TOKENS = 1500;
 
 /** Max token budget for compacted summary. */
-const MAX_SUMMARY_TOKENS = 800;
+const _MAX_SUMMARY_TOKENS = 800;
 
 // ── Tool result capping (P0-2) ────────────────────────────────────────────────
 
@@ -127,7 +125,7 @@ export async function compactMessages(
 
   // Build a condensed representation of middle messages for the summarizer
   const middleText = middleMessages
-    .map((m, i) => `[${m.role}] ${m.content.slice(0, 500)}${m.content.length > 500 ? '…' : ''}`)
+    .map((m) => `[${m.role}] ${m.content.slice(0, 500)}${m.content.length > 500 ? '…' : ''}`)
     .join('\n---\n');
 
   // Try to summarize via LLM
