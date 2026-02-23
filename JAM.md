@@ -157,3 +157,24 @@ npm run clean  # rm -rf dist
 
 
 <!-- Add anything else Jam should know when answering questions about this project. -->
+
+
+
+
+
+
+## Frequently Accessed Files
+
+<!-- jam-auto-usage -->
+
+> Auto-updated by Jam based on your usage patterns. These are the files most frequently
+> examined when answering questions. Jam will prioritize searching these locations.
+
+- `src/commands/ask.ts` (1x)
+
+<!-- jam-auto-usage -->
+
+
+
+
+

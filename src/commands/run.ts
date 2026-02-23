@@ -362,7 +362,7 @@ export async function runRun(instruction: string | undefined, options: RunOption
       // Track files read this iteration (for read-before-write gate)
       for (const tc of response.toolCalls ?? []) {
         if (tc.name === 'read_file' && typeof tc.arguments['path'] === 'string') {
-          readFiles.add(tc.arguments['path'] as string);
+          readFiles.add(tc.arguments['path']);
         }
       }
 
@@ -407,7 +407,7 @@ export async function runRun(instruction: string | undefined, options: RunOption
         // Block write operations if the target file hasn't been read yet.
         // This prevents the model from overwriting files it hasn't inspected.
         if (!isReadonly && tc.name !== 'run_command') {
-          const targetPath = typeof tc.arguments['path'] === 'string' ? tc.arguments['path'] as string : null;
+          const targetPath = typeof tc.arguments['path'] === 'string' ? tc.arguments['path'] : null;
           if (targetPath && !readFiles.has(targetPath)) {
             // Auto-read the file first
             stderrLog(formatInternalStatus(`Read-before-write: reading ${targetPath} first…`, noColor) + '\n');
@@ -481,7 +481,7 @@ export async function runRun(instruction: string | undefined, options: RunOption
           tc.name === 'write_file' &&
           typeof tc.arguments['path'] === 'string'
         ) {
-          const writtenPath = tc.arguments['path'] as string;
+          const writtenPath = tc.arguments['path'];
           const origLines = originalLineCounts.get(writtenPath);
           if (origLines && origLines > 10) {
             try {

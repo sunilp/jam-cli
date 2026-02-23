@@ -336,12 +336,12 @@ RULES:
 - ALWAYS include at least one read step of an EXISTING similar file to understand the pattern before writing anything
 - NEVER read a file you are about to create (it doesn't exist yet)
 - ALWAYS include a read step for every EXISTING file you will modify
-- When writing an existing file, the content must be the COMPLETE file (not stubs like \"// existing code...\") based on what you read
+- When writing an existing file, the content must be the COMPLETE file (not stubs like "// existing code...") based on what you read
 - When creating a new file, the content must match the patterns found in the reference files you read
 - Allowed tools: search_text, read_file, list_dir, write_file, apply_patch
-- search_text args: { \"query\": \"actual_code_identifier\", \"glob\": \"*.ts\" }
-- read_file args: { \"path\": \"src/some/file.ts\" }
-- write_file args: { \"path\": \"src/some/file.ts\", \"content\": \"placeholder\" }  (executor will fill real content based on reads)
+- search_text args: { "query": "actual_code_identifier", "glob": "*.ts" }
+- read_file args: { "path": "src/some/file.ts" }
+- write_file args: { "path": "src/some/file.ts", "content": "placeholder" }  (executor will fill real content based on reads)
 - 3 to 8 steps
 - Output ONLY the raw JSON object. No markdown fences, no explanation.`;
 
