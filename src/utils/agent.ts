@@ -16,7 +16,7 @@
 import { readdir } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { loadContextFile } from './context.js';
-import type { ProviderAdapter } from '../providers/base.js';
+import type { ProviderAdapter, Message } from '../providers/base.js';
 
 // ── ANSI helpers ──────────────────────────────────────────────────────────────
 
@@ -230,7 +230,354 @@ export async function generateSearchPlan(
   }
 }
 
-// ── Query expansion / prompt enrichment ───────────────────────────────────────
+// ── Structured Execution Plan ─────────────────────────────────────────────────
+
+/** One step in a structured execution plan. */
+export interface PlanStep {
+  /** Sequential step number starting at 1. */
+  id: number;
+  /** Human-readable description, e.g. "Search for createProvider in factory.ts". */
+  action: string;
+  /** Tool to use: 'search_text' | 'read_file' | 'list_dir'. */
+  tool: string;
+  /** Exact arguments to pass to the tool. */
+  args: Record<string, unknown>;
+  /** What constitutes success, e.g. "Found function signature in src/providers/factory.ts". */
+  successCriteria: string;
+}
+
+/** A structured execution plan produced by the planner LLM call. */
+export interface ExecutionPlan {
+  /** One-sentence restatement of what the user wants. */
+  intent: string;
+  /** Ordered steps to execute. */
+  steps: PlanStep[];
+  /** Planner's minimum number of steps before the executor should attempt an answer. */
+  minStepsBeforeAnswer: number;
+  /** Files likely to be relevant (hints for the executor). */
+  expectedFiles: string[];
+}
+
+const STRUCTURED_PLANNER_SYSTEM_PROMPT = `You are an execution planner for a code assistant. Produce a precise, ordered JSON plan for answering a question about a codebase.
+
+Output a JSON object with EXACTLY this structure (no prose, no markdown, just JSON):
+{
+  "intent": "one sentence: what the user actually wants",
+  "steps": [
+    {
+      "id": 1,
+      "action": "Search for createProvider function definition",
+      "tool": "search_text",
+      "args": { "query": "createProvider", "glob": "*.ts", "max_results": 10 },
+      "successCriteria": "Found the file and line where createProvider is defined"
+    }
+  ],
+  "minStepsBeforeAnswer": 2,
+  "expectedFiles": ["src/providers/factory.ts"]
+}
+
+RULES:
+- steps must only use tools: search_text, read_file, list_dir
+- search_text args: { "query": "...", "glob": "*.ts" }  (query MUST be a specific code identifier — function name, class name, import path, variable name — NEVER a generic English word)
+- read_file args: { "path": "src/some/file.ts" }
+- list_dir args: { "path": "src/some/" }
+- 2 to 6 steps only
+- Output ONLY the raw JSON object. No markdown fences, no explanation.`;
+
+/**
+ * Generate a structured, typed execution plan.
+ * Falls back to null on parse failure — callers should fall back to generateSearchPlan.
+ */
+export async function generateExecutionPlan(
+  provider: ProviderAdapter,
+  question: string,
+  projectContext: string,
+  options: { model?: string; temperature?: number; maxTokens?: number },
+): Promise<ExecutionPlan | null> {
+  try {
+    const request = {
+      messages: [{
+        role: 'user' as const,
+        content: [
+          `Question: "${question}"`,
+          '',
+          'Project context:',
+          projectContext,
+          '',
+          'Produce a precise execution plan as a JSON object.',
+        ].join('\n'),
+      }],
+      model: options.model,
+      temperature: 0.1,
+      maxTokens: 600,
+      systemPrompt: STRUCTURED_PLANNER_SYSTEM_PROMPT,
+    };
+
+    let raw = '';
+    const stream = provider.streamCompletion(request);
+    for await (const chunk of stream) {
+      if (!chunk.done) raw += chunk.delta;
+    }
+
+    return parseExecutionPlan(raw.trim());
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Parse a JSON execution plan from the model's response.
+ * Handles markdown code-block wrappers and leading/trailing prose.
+ */
+export function parseExecutionPlan(text: string): ExecutionPlan | null {
+  // Strip markdown code block wrappers if present
+  let cleaned = text
+    .replace(/^```(?:json)?\s*/m, '')
+    .replace(/\s*```\s*$/m, '')
+    .trim();
+
+  // Find the outermost JSON object
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start === -1 || end === -1) return null;
+  cleaned = cleaned.slice(start, end + 1);
+
+  try {
+    const parsed: unknown = JSON.parse(cleaned);
+    return isValidExecutionPlan(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function isValidExecutionPlan(obj: unknown): obj is ExecutionPlan {
+  if (typeof obj !== 'object' || obj === null) return false;
+  const p = obj as Record<string, unknown>;
+  if (typeof p['intent'] !== 'string') return false;
+  if (!Array.isArray(p['steps']) || p['steps'].length === 0) return false;
+  if (typeof p['minStepsBeforeAnswer'] !== 'number') return false;
+  if (!Array.isArray(p['expectedFiles'])) return false;
+  for (const step of p['steps'] as unknown[]) {
+    if (typeof step !== 'object' || step === null) return false;
+    const s = step as Record<string, unknown>;
+    if (typeof s['id'] !== 'number') return false;
+    if (typeof s['action'] !== 'string') return false;
+    if (typeof s['tool'] !== 'string') return false;
+    if (typeof s['args'] !== 'object' || s['args'] === null) return false;
+    if (typeof s['successCriteria'] !== 'string') return false;
+  }
+  return true;
+}
+
+/**
+ * Format an ExecutionPlan as a visual block for stderr display.
+ */
+export function formatExecutionPlanBlock(plan: ExecutionPlan, noColor: boolean): string {
+  const lines = [
+    `Intent: ${plan.intent}`,
+    '',
+    ...plan.steps.flatMap(s => [
+      `Step ${s.id}: [${s.tool}] ${s.action}`,
+      `  args: ${JSON.stringify(s.args)}`,
+      `  ✓ ${s.successCriteria}`,
+      '',
+    ]),
+    `Min steps before answering: ${plan.minStepsBeforeAnswer}`,
+    ...(plan.expectedFiles.length > 0
+      ? [`Expected files: ${plan.expectedFiles.join(', ')}`]
+      : []),
+  ].filter(l => l !== undefined);
+
+  if (noColor) {
+    return lines.map(l => `  │ ${l}`).join('\n');
+  }
+  return lines
+    .map(l => `  ${ansi(ANSI.dimBlue, '│')} ${ansi(ANSI.dimBlue, l)}`)
+    .join('\n');
+}
+
+/**
+ * Enrich the user's prompt with a structured execution plan.
+ * Gives the model explicit, ordered steps with exact tool args so it does not meander.
+ */
+export function enrichUserPromptWithPlan(prompt: string, plan: ExecutionPlan): string {
+  const stepLines = plan.steps
+    .map(s =>
+      [
+        `**Step ${s.id}:** ${s.action}`,
+        `  - Tool: \`${s.tool}\` — args: \`${JSON.stringify(s.args)}\``,
+        `  - Done when: ${s.successCriteria}`,
+      ].join('\n')
+    )
+    .join('\n\n');
+
+  return [
+    prompt,
+    '',
+    '---',
+    '',
+    '## Execution Plan',
+    '',
+    `**Goal:** ${plan.intent}`,
+    '',
+    stepLines,
+    '',
+    `**Minimum ${plan.minStepsBeforeAnswer} step(s) required before answering.**`,
+    plan.expectedFiles.length > 0
+      ? `**Likely relevant files:** ${plan.expectedFiles.join(', ')}`
+      : '',
+    '',
+    '## Instructions',
+    '- Execute the steps above **in order**, using the exact tool and args listed.',
+    '- Do not repeat a step you already completed.',
+    `- After completing at least ${plan.minStepsBeforeAnswer} steps, synthesize your final answer.`,
+    '- Final answer must be clean Markdown with specific file paths, line numbers, and code snippets.',
+    '- Do NOT output raw JSON. Do NOT ask clarifying questions — the plan tells you what to find.',
+  ].filter(Boolean).join('\n');
+}
+
+// ── Step Verifier ─────────────────────────────────────────────────────────────
+
+/** Result from the step verifier mid-process check. */
+export interface VerifierResult {
+  /** Whether the agent has enough context to answer, needs more, or is stuck. */
+  status: 'need-more' | 'ready-to-answer' | 'stuck';
+  /** Next step ID to focus on (1-based). 0 when ready-to-answer. */
+  nextStepId: number;
+  /** Brief explanation. */
+  reason: string;
+}
+
+const VERIFIER_SYSTEM_PROMPT = `You are a progress verifier for a code search agent.
+
+You receive: the user's question, the execution plan, and a summary of tool results collected so far.
+
+Determine the agent's status — output EXACTLY this format, nothing else:
+
+STATUS: ready-to-answer
+STEP: 0
+REASON: Found the factory in src/providers/factory.ts with all provider cases covered.
+
+or:
+
+STATUS: need-more
+STEP: 2
+REASON: Found function signature but haven't read the file body yet.
+
+or:
+
+STATUS: stuck
+STEP: 1
+REASON: All searches returned no results — the queries used generic words instead of code identifiers.
+
+Definitions:
+- ready-to-answer: tool results contain specific file paths, code snippets, or data that directly answers the question
+- need-more: some relevant info found but critical details still missing
+- stuck: 3+ rounds of tool calls with no relevant results found`;
+
+/**
+ * Mid-process verifier: checks every N rounds whether the agent has enough
+ * context to answer or is stuck. Enables early termination and targeted recovery.
+ */
+export class StepVerifier {
+  /**
+   * Run a cheap verifier LLM call against the current tool results.
+   * Non-fatal — returns 'need-more' on any failure.
+   */
+  async verify(
+    provider: ProviderAdapter,
+    question: string,
+    plan: ExecutionPlan | null,
+    toolResultsSummary: string,
+    options: { model?: string },
+  ): Promise<VerifierResult> {
+    const fallback: VerifierResult = { status: 'need-more', nextStepId: 1, reason: 'Verifier unavailable.' };
+    try {
+      const planText = plan
+        ? plan.steps.map(s => `Step ${s.id}: [${s.tool}] ${s.action}`).join('\n')
+        : '(no structured plan)';
+
+      const request = {
+        messages: [{
+          role: 'user' as const,
+          content: [
+            '## Question',
+            question,
+            '',
+            '## Execution Plan',
+            planText,
+            '',
+            '## Tool Results So Far',
+            toolResultsSummary || '(no results yet)',
+          ].join('\n'),
+        }],
+        model: options.model,
+        temperature: 0.1,
+        maxTokens: 80,
+        systemPrompt: VERIFIER_SYSTEM_PROMPT,
+      };
+
+      let raw = '';
+      const stream = provider.streamCompletion(request);
+      for await (const chunk of stream) {
+        if (!chunk.done) raw += chunk.delta;
+      }
+
+      return this.parseVerifierResponse(raw.trim()) ?? fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  /** Parse the verifier's structured response. Exported for testing. */
+  parseVerifierResponse(text: string): VerifierResult | null {
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length === 0) return null;
+
+    const statusLine = lines.find(l => /^STATUS:/i.test(l));
+    const stepLine   = lines.find(l => /^STEP:/i.test(l));
+    const reasonLine = lines.find(l => /^REASON:/i.test(l));
+
+    if (!statusLine) return null;
+
+    const raw = statusLine.replace(/^STATUS:\s*/i, '').trim().toLowerCase();
+    let status: VerifierResult['status'];
+    if (raw.includes('ready')) status = 'ready-to-answer';
+    else if (raw.includes('stuck')) status = 'stuck';
+    else status = 'need-more';
+
+    const nextStepId = stepLine
+      ? (parseInt(stepLine.replace(/^STEP:\s*/i, '').trim(), 10) || 0)
+      : 0;
+
+    const reason = reasonLine
+      ? reasonLine.replace(/^REASON:\s*/i, '').trim()
+      : 'No reason provided.';
+
+    return { status, nextStepId, reason };
+  }
+}
+
+/**
+ * Extract a summary of the most recent tool results from the message history.
+ * Fed to the StepVerifier so it can assess progress without the full context.
+ */
+export function buildToolResultsSummary(messages: Message[]): string {
+  const toolMsgs = messages
+    .filter(m => m.role === 'user' && m.content.startsWith('[Tool result:'))
+    .slice(-6);
+
+  if (toolMsgs.length === 0) return '';
+
+  return toolMsgs
+    .map(m => {
+      const content = m.content;
+      return content.length > 300 ? content.slice(0, 300) + '…' : content;
+    })
+    .join('\n\n');
+}
+
+// ── Query expansion / prompt enrichment ────────────────────────────────────────
 
 /**
  * Enrich the user's prompt with search strategy guidance.

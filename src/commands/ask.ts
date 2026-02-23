@@ -12,6 +12,11 @@ import {
   buildSystemPrompt,
   enrichUserPrompt,
   generateSearchPlan,
+  generateExecutionPlan,
+  enrichUserPromptWithPlan,
+  formatExecutionPlanBlock,
+  StepVerifier,
+  buildToolResultsSummary,
   buildSynthesisReminder,
   formatToolCall,
   formatToolResult,
@@ -21,6 +26,7 @@ import {
   formatUsage,
   formatPlanBlock,
   formatInternalStatus,
+  type ExecutionPlan,
 } from '../utils/agent.js';
 import { WorkingMemory } from '../utils/memory.js';
 import { ToolResultCache } from '../utils/cache.js';
@@ -174,24 +180,43 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
         pastContext = formatPastExchanges(pastExchanges);
       } catch { /* non-fatal */ }
 
-      // ── Planning phase: deep reasoning about what to search for ─────────
+      // ── Planning phase: structured plan first, text plan fallback ────────
       stderrLog(formatSeparator('Planning', noColor));
       const projectCtxForPlan = [jamContext ?? workspaceCtx, symbolHint, pastContext].filter(Boolean).join('\n\n');
-      const searchPlan = await generateSearchPlan(adapter, prompt, projectCtxForPlan, {
+
+      let structuredPlan: ExecutionPlan | null = null;
+      let enrichedPrompt: string;
+
+      // Try to produce a structured JSON execution plan
+      structuredPlan = await generateExecutionPlan(adapter, prompt, projectCtxForPlan, {
         model: profile.model,
         temperature: profile.temperature,
         maxTokens: profile.maxTokens,
       });
 
-      if (searchPlan) {
-        stderrLog(formatPlanBlock(searchPlan, noColor) + '\n');
+      if (structuredPlan) {
+        stderrLog(formatExecutionPlanBlock(structuredPlan, noColor) + '\n');
+        enrichedPrompt = enrichUserPromptWithPlan(prompt, structuredPlan);
       } else {
-        stderrLog(formatInternalStatus('planning skipped — using generic search strategy', noColor) + '\n');
+        // Fall back to free-text search plan
+        const searchPlan = await generateSearchPlan(adapter, prompt, projectCtxForPlan, {
+          model: profile.model,
+          temperature: profile.temperature,
+          maxTokens: profile.maxTokens,
+        });
+        if (searchPlan) {
+          stderrLog(formatPlanBlock(searchPlan, noColor) + '\n');
+        } else {
+          stderrLog(formatInternalStatus('planning skipped — using generic search strategy', noColor) + '\n');
+        }
+        enrichedPrompt = enrichUserPrompt(prompt, searchPlan);
       }
 
-      // Enrich the user's prompt with the search plan
-      const enrichedPrompt = enrichUserPrompt(prompt, searchPlan);
       let messages: Message[] = [{ role: 'user', content: enrichedPrompt }];
+
+      // Step tracking for structured plan
+      let currentStepIdx = 0;
+      const stepVerifier = new StepVerifier();
 
       const MAX_TOOL_ROUNDS = 15;
       let synthesisInjected = false;
@@ -199,6 +224,43 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
       stderrLog(formatSeparator('Searching codebase', noColor));
 
       for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+        // ── Step injection: remind model of the current plan step ─────────
+        if (structuredPlan && round > 0 && round % 3 === 0 && currentStepIdx < structuredPlan.steps.length) {
+          const step = structuredPlan.steps[currentStepIdx]!;
+          messages.push({
+            role: 'user',
+            content: `[STEP REMINDER — Step ${step.id} of ${structuredPlan.steps.length}: ${step.action}. Use tool \`${step.tool}\` with args \`${JSON.stringify(step.args)}\`. Done when: ${step.successCriteria}]`,
+          });
+        }
+
+        // ── Verifier: check progress every 3 rounds after ≥2 tool calls ───
+        if (round > 0 && round % 3 === 0 && tracker.totalCalls >= 2) {
+          stderrLog(formatInternalStatus('Verifying progress…', noColor) + '\n');
+          const summary = buildToolResultsSummary(messages);
+          const vResult = await stepVerifier.verify(adapter, prompt, structuredPlan, summary, { model: profile.model });
+
+          if (vResult.status === 'ready-to-answer') {
+            stderrLog(formatInternalStatus(`Verifier: sufficient context — synthesizing answer`, noColor) + '\n');
+            if (!synthesisInjected) {
+              synthesisInjected = true;
+              messages.push({ role: 'user', content: buildSynthesisReminder(prompt) });
+            }
+            // Skip remaining tool rounds — let model produce final answer
+          } else if (vResult.status === 'stuck') {
+            stderrLog(formatInternalStatus(`Verifier: stuck — ${vResult.reason}`, noColor) + '\n');
+            const nextStep = structuredPlan?.steps.find(s => s.id === vResult.nextStepId);
+            const stuckHint = [
+              `[VERIFIER: You appear stuck. ${vResult.reason}`,
+              nextStep
+                ? `Focus on Step ${nextStep.id}: use \`${nextStep.tool}\` with args \`${JSON.stringify(nextStep.args)}\`.`
+                : 'Try a completely different search term or use list_dir to explore the directory structure.',
+              ']',
+            ].join(' ');
+            messages.push({ role: 'user', content: stuckHint });
+          }
+          // For 'need-more': continue normally
+        }
+
         // ── Context window management: compact if approaching limit ───────
         if (memory.shouldCompact(messages)) {
           stderrLog(formatInternalStatus('Compacting context…', noColor) + '\n');
@@ -232,10 +294,13 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
                 updateContextWithUsage(workspaceRoot, log.readFiles, log.searchQueries).catch(() => {});
                 return;
               }
-              // Critic rejected — use its specific feedback
+              // Critic rejected — re-enter loop at the last incomplete plan step
               stderrLog(formatInternalStatus(`Critic: ${verdict.reason}`, noColor) + '\n');
               messages.push({ role: 'assistant', content: finalText });
-              messages.push({ role: 'user', content: buildCriticCorrection(verdict, prompt) });
+              const stepHint = structuredPlan && currentStepIdx < structuredPlan.steps.length
+                ? `\n\nResume the execution plan from Step ${structuredPlan.steps[currentStepIdx]!.id}: ${structuredPlan.steps[currentStepIdx]!.action}. Gather more specific evidence before answering.`
+                : '';
+              messages.push({ role: 'user', content: buildCriticCorrection(verdict, prompt) + stepHint });
               continue;
             }
 
@@ -252,7 +317,10 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
             if (!verdict.pass) {
               stderrLog(formatInternalStatus(`Critic: ${verdict.reason}`, noColor) + '\n');
               messages.push({ role: 'assistant', content: finalText });
-              messages.push({ role: 'user', content: buildCriticCorrection(verdict, prompt) });
+              const stepHint = structuredPlan && currentStepIdx < structuredPlan.steps.length
+                ? `\n\nResume the execution plan from Step ${structuredPlan.steps[currentStepIdx]!.id}: ${structuredPlan.steps[currentStepIdx]!.action}.`
+                : '';
+              messages.push({ role: 'user', content: buildCriticCorrection(verdict, prompt) + stepHint });
               continue;
             }
           }
@@ -263,6 +331,14 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
           const log = memory.getAccessLog();
           updateContextWithUsage(workspaceRoot, log.readFiles, log.searchQueries).catch(() => {});
           return;
+        }
+
+        // ── Advance plan step if executor used the planned tool ─────────────
+        if (structuredPlan && currentStepIdx < structuredPlan.steps.length && response.toolCalls?.length) {
+          const expectedTool = structuredPlan.steps[currentStepIdx]!.tool;
+          if (response.toolCalls.some(tc => tc.name === expectedTool)) {
+            currentStepIdx++;
+          }
         }
 
         // ── Execute tool calls ────────────────────────────────────────────────
