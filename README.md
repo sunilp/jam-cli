@@ -20,6 +20,7 @@
 **The developer-first AI assistant for the terminal.**
 
 [![CI](https://github.com/sunilp/jam-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/sunilp/jam-cli/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/@sunilp-org/jam-cli.svg)](https://www.npmjs.com/package/@sunilp-org/jam-cli)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-green.svg)](https://nodejs.org)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
@@ -57,7 +58,7 @@ Most AI coding tools are built around a single vendor's model, require a browser
 | 💬 | **Interactive chat** | Multi-turn sessions with history and resume |
 | 📂 | **Repo-aware** | Explain files, search code, review diffs with full workspace context |
 | 🩹 | **Patch workflow** | Generate unified diffs, validate, preview, and apply with confirmation |
-| 🤖 | **Tool-calling agent** | `jam run` gives the model access to local tools (read, search, diff, apply) |
+| 🤖 | **Structured agent** | `jam run` uses a typed plan-then-execute loop: the model plans steps first, then executes with read-before-write safety and shrinkage guards |
 | 🔌 | **Pluggable providers** | Ollama, OpenAI, Groq, **Embedded** built-in; adapter pattern for adding any LLM |
 | 📦 | **Embedded inference** | **[Experimental]** Run without Ollama — tiny GGUF model runs directly in-process via `node-llama-cpp` |
 | ⚙️ | **Layered config** | Global → repo → CLI flags; multiple named profiles |
@@ -324,13 +325,33 @@ jam patch "Remove unused imports" --yes                      # auto-confirm appl
 
 ### `jam run`
 
-Agentic task workflow — the model can call tools in a loop to accomplish a goal.
+Agentic task workflow using a **structured plan-then-execute** loop. The model first generates a typed `ExecutionPlan` with ordered steps and success criteria, then executes each step with full safety enforcement.
 
 ```bash
 jam run "Find all TODO comments and summarize them"
 jam run "Check git status and explain what's changed"
 jam run "Read src/config.ts and identify any security issues"
+jam run "Add input validation to the login handler"   # involves writes
+jam run --yes "Rename all occurrences of userId to accountId"  # auto-approve writes
 ```
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--yes` | Auto-approve all write tool confirmations (non-interactive) |
+| `--model <id>` | Override model for this task |
+| `--provider <name>` | Override provider |
+| `--profile <name>` | Use a named config profile |
+| `--json` | Machine-readable JSON output |
+
+**How it works:**
+
+1. **Plan** — model generates an ordered list of steps (read → understand → write) with explicit success criteria
+2. **Execute** — each step runs in sequence; read-only results are cached to avoid redundant calls
+3. **Read-before-write gate** — write tools are automatically blocked until the target file has been read first, preventing silent overwrites of unread files
+4. **Shrinkage guard** — if a `write_file` produces a file suspiciously smaller than the original, the write is auto-reverted and the model is redirected
+5. **Critic pass** — after the loop completes, a critic evaluates the result and injects a correction if quality is insufficient
 
 **Available tools (model-callable):**
 
@@ -345,7 +366,7 @@ jam run "Read src/config.ts and identify any security issues"
 | `apply_patch` | **Write** | Apply a unified diff (prompts for confirmation) |
 | `run_command` | **Write** | Execute a shell command (dangerous patterns blocked; prompts for confirmation) |
 
-Write tools require confirmation unless `toolPolicy` is set to `allowlist` in config.
+Write tools require confirmation unless `toolPolicy` is set to `always` or `allowlist` in config.
 
 ---
 
@@ -482,7 +503,7 @@ Jam merges config in priority order (highest wins):
 |-------|------|---------|-------------|
 | `defaultProfile` | string | `"default"` | Active profile name |
 | `profiles` | object | see below | Named provider/model configurations |
-| `toolPolicy` | `ask_every_time` \| `allowlist` \| `never` | `ask_every_time` | How write tools require confirmation |
+| `toolPolicy` | `ask_every_time` \| `always` \| `allowlist` \| `never` | `ask_every_time` | How write tools require confirmation |
 | `toolAllowlist` | string[] | `[]` | Tools that never prompt (when policy is `allowlist`) |
 | `historyEnabled` | boolean | `true` | Save chat sessions to disk |
 | `logLevel` | `silent` \| `error` \| `warn` \| `info` \| `debug` | `warn` | Log verbosity |
@@ -796,7 +817,7 @@ jam skill list
 
 ### 🤖 Sub-Agents & Task Decomposition
 
-The current agent loop (`jam run`) is a single monolithic ReAct loop. Sub-agents would enable the planner to decompose complex instructions into specialized child tasks.
+`jam run` now uses a **structured plan-then-execute** loop (typed `ExecutionPlan` with ordered steps, read-before-write enforcement, and a critic pass). The next evolution is true sub-agent decomposition — routing specialist child agents for independent sub-tasks.
 
 - **Planner agent** — breaks a complex instruction into an ordered DAG of sub-tasks
 - **Specialist delegation** — each sub-task dispatched to a purpose-built sub-agent (e.g., "read and understand", "refactor", "write tests", "verify")
