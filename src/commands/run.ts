@@ -11,6 +11,11 @@ import {
   buildSystemPrompt,
   enrichUserPrompt,
   generateSearchPlan,
+  generateExecutionPlan,
+  enrichUserPromptWithPlan,
+  formatExecutionPlanBlock,
+  StepVerifier,
+  buildToolResultsSummary,
   buildSynthesisReminder,
   formatToolCall,
   formatToolResult,
@@ -20,6 +25,7 @@ import {
   formatUsage,
   formatPlanBlock,
   formatInternalStatus,
+  type ExecutionPlan,
 } from '../utils/agent.js';
 import { WorkingMemory } from '../utils/memory.js';
 import { ToolResultCache } from '../utils/cache.js';
@@ -88,29 +94,45 @@ export async function runRun(instruction: string | undefined, options: RunOption
       pastContext = formatPastExchanges(pastExchanges);
     } catch { /* non-fatal */ }
 
-    // ── Planning phase ────────────────────────────────────────────────────
+    // ── Planning phase ─────────────────────────────────────────────────────
     stderrLog(formatSeparator('Planning', noColor));
     const projectCtxForPlan = [jamContext ?? workspaceCtx, symbolHint, pastContext].filter(Boolean).join('\n\n');
-    const searchPlan = await generateSearchPlan(adapter, instruction, projectCtxForPlan, {
+
+    let structuredPlan: ExecutionPlan | null = null;
+    let enrichedInstruction: string;
+
+    structuredPlan = await generateExecutionPlan(adapter, instruction, projectCtxForPlan, {
       model: profile.model,
       temperature: profile.temperature,
       maxTokens: profile.maxTokens,
     });
 
-    if (searchPlan) {
-      stderrLog(formatPlanBlock(searchPlan, noColor) + '\n');
+    if (structuredPlan) {
+      stderrLog(formatExecutionPlanBlock(structuredPlan, noColor) + '\n');
+      enrichedInstruction = enrichUserPromptWithPlan(instruction, structuredPlan);
     } else {
-      stderrLog(formatInternalStatus('planning skipped — using generic strategy', noColor) + '\n');
+      const searchPlan = await generateSearchPlan(adapter, instruction, projectCtxForPlan, {
+        model: profile.model,
+        temperature: profile.temperature,
+        maxTokens: profile.maxTokens,
+      });
+      if (searchPlan) {
+        stderrLog(formatPlanBlock(searchPlan, noColor) + '\n');
+      } else {
+        stderrLog(formatInternalStatus('planning skipped — using generic strategy', noColor) + '\n');
+      }
+      enrichedInstruction = enrichUserPrompt(instruction, searchPlan);
     }
-
-    // Enrich the instruction with the search plan
-    const enrichedInstruction = enrichUserPrompt(instruction, searchPlan);
 
     let messages: Message[] = [
       { role: 'user', content: enrichedInstruction },
     ];
 
     const tracker = new ToolCallTracker();
+    let currentStepIdx = 0;
+    // Track which files have been read — used to enforce read-before-write
+    const readFiles = new Set<string>();
+    const stepVerifier = new StepVerifier();
 
     if (!adapter.chatWithTools) {
       await printError('Provider does not support tool calling. Use a provider/model that supports tools.');
@@ -141,7 +163,42 @@ export async function runRun(instruction: string | undefined, options: RunOption
     stderrLog(formatSeparator('Working', noColor));
 
     for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
-      // Context window management
+      // ── Step injection: remind model of current plan step every 3 rounds ──
+      if (structuredPlan && iteration > 0 && iteration % 3 === 0 && currentStepIdx < structuredPlan.steps.length) {
+        const step = structuredPlan.steps[currentStepIdx]!;
+        messages.push({
+          role: 'user',
+          content: `[STEP REMINDER — Step ${step.id} of ${structuredPlan.steps.length}: ${step.action}. Use tool \`${step.tool}\` with args \`${JSON.stringify(step.args)}\`. Done when: ${step.successCriteria}]`,
+        });
+      }
+
+      // ── Verifier: check progress every 3 rounds after ≥2 tool calls ────────
+      if (iteration > 0 && iteration % 3 === 0 && tracker.totalCalls >= 2) {
+        stderrLog(formatInternalStatus('Verifying progress…', noColor) + '\n');
+        const summary = buildToolResultsSummary(messages);
+        const vResult = await stepVerifier.verify(adapter, instruction, structuredPlan, summary, { model: profile.model });
+
+        if (vResult.status === 'ready-to-answer') {
+          stderrLog(formatInternalStatus('Verifier: sufficient context — synthesizing result', noColor) + '\n');
+          if (!synthesisInjected) {
+            synthesisInjected = true;
+            messages.push({ role: 'user', content: buildSynthesisReminder(instruction) });
+          }
+        } else if (vResult.status === 'stuck') {
+          stderrLog(formatInternalStatus(`Verifier: stuck — ${vResult.reason}`, noColor) + '\n');
+          const nextStep = structuredPlan?.steps.find(s => s.id === vResult.nextStepId);
+          const stuckHint = [
+            `[VERIFIER: You appear stuck. ${vResult.reason}`,
+            nextStep
+              ? `Focus on Step ${nextStep.id}: use \`${nextStep.tool}\` with args \`${JSON.stringify(nextStep.args)}\`.`
+              : 'Try list_dir to explore directories, then read concrete files.',
+            ']',
+          ].join(' ');
+          messages.push({ role: 'user', content: stuckHint });
+        }
+      }
+
+      // ── Context window management ──────────────────────────────────────────
       if (memory.shouldCompact(messages)) {
         stderrLog(formatInternalStatus('Compacting context…', noColor) + '\n');
         messages = await memory.compact(messages);
@@ -162,7 +219,7 @@ export async function runRun(instruction: string | undefined, options: RunOption
         if (tracker.totalCalls > 0 && !synthesisInjected && iteration < MAX_ITERATIONS - 2) {
           synthesisInjected = true;
           if (finalText.trim().length > 0) {
-            stderrLog(formatInternalStatus('Evaluating answer quality…', noColor) + '\n');
+            stderrLog(formatInternalStatus('Evaluating result quality…', noColor) + '\n');
             const verdict = await criticEvaluate(adapter, instruction, finalText, { model: profile.model });
             if (verdict.pass) {
               await renderResult(finalText, response.usage);
@@ -170,10 +227,13 @@ export async function runRun(instruction: string | undefined, options: RunOption
             }
             stderrLog(formatInternalStatus(`Critic: ${verdict.reason}`, noColor) + '\n');
             messages.push({ role: 'assistant', content: finalText });
-            messages.push({ role: 'user', content: buildCriticCorrection(verdict, instruction) });
+            const stepHint = structuredPlan && currentStepIdx < structuredPlan.steps.length
+              ? `\n\nResume execution plan at Step ${structuredPlan.steps[currentStepIdx]!.id}: ${structuredPlan.steps[currentStepIdx]!.action}.`
+              : '';
+            messages.push({ role: 'user', content: buildCriticCorrection(verdict, instruction) + stepHint });
             continue;
           }
-          stderrLog(formatInternalStatus('Grounding answer to your question…', noColor) + '\n');
+          stderrLog(formatInternalStatus('Grounding answer to instruction…', noColor) + '\n');
           messages.push({ role: 'assistant', content: finalText });
           messages.push({ role: 'user', content: buildSynthesisReminder(instruction) });
           continue;
@@ -185,13 +245,31 @@ export async function runRun(instruction: string | undefined, options: RunOption
           if (!verdict.pass) {
             stderrLog(formatInternalStatus(`Critic: ${verdict.reason}`, noColor) + '\n');
             messages.push({ role: 'assistant', content: finalText });
-            messages.push({ role: 'user', content: buildCriticCorrection(verdict, instruction) });
+            const stepHint = structuredPlan && currentStepIdx < structuredPlan.steps.length
+              ? `\n\nResume execution plan at Step ${structuredPlan.steps[currentStepIdx]!.id}.`
+              : '';
+            messages.push({ role: 'user', content: buildCriticCorrection(verdict, instruction) + stepHint });
             continue;
           }
         }
 
         await renderResult(finalText, response.usage);
         break;
+      }
+
+      // Advance plan step if executor used the planned tool
+      if (structuredPlan && currentStepIdx < structuredPlan.steps.length && response.toolCalls?.length) {
+        const expectedTool = structuredPlan.steps[currentStepIdx]!.tool;
+        if (response.toolCalls.some(tc => tc.name === expectedTool)) {
+          currentStepIdx++;
+        }
+      }
+
+      // Track files read this iteration (for read-before-write gate)
+      for (const tc of response.toolCalls ?? []) {
+        if (tc.name === 'read_file' && typeof tc.arguments['path'] === 'string') {
+          readFiles.add(tc.arguments['path'] as string);
+        }
       }
 
       // Add assistant message to conversation
@@ -230,6 +308,26 @@ export async function runRun(instruction: string | undefined, options: RunOption
         }
 
         stderrLog(formatToolCall(tc.name, tc.arguments, noColor) + '\n');
+
+        // ── Read-before-write gate ─────────────────────────────────────────
+        // Block write operations if the target file hasn't been read yet.
+        // This prevents the model from overwriting files it hasn't inspected.
+        if (!isReadonly && tc.name !== 'run_command') {
+          const targetPath = typeof tc.arguments['path'] === 'string' ? tc.arguments['path'] as string : null;
+          if (targetPath && !readFiles.has(targetPath)) {
+            // Auto-read the file first
+            stderrLog(formatInternalStatus(`Read-before-write: reading ${targetPath} first…`, noColor) + '\n');
+            try {
+              const { executeReadOnlyTool } = await import('../tools/context-tools.js');
+              const existing = await executeReadOnlyTool('read_file', { path: targetPath }, workspaceRoot);
+              readFiles.add(targetPath);
+              const capped = memory.processToolResult('read_file', { path: targetPath }, existing);
+              messages.push({ role: 'user', content: `[Auto-read before write] Current content of ${targetPath}:\n${capped}` });
+            } catch {
+              // File doesn't exist yet (new file) — that's fine, proceed
+            }
+          }
+        }
 
         // Confirm write tools based on policy
         if (!isReadonly) {
