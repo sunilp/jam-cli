@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-02-23
+
+### Added
+- **Structured plan-then-execute reasoning** for `jam run`: the agent now generates a typed `ExecutionPlan` (ordered steps with success criteria) before acting, replacing the free-text ReAct loop
+- **Read-before-write gate**: write tools are automatically blocked until the target file has been read, preventing silent overwrites of unread files
+- **Post-write shrinkage guard**: if a `write_file` call produces a file suspiciously smaller than the original, the file is auto-restored from git and the model is redirected
+- **`--yes` flag** on `jam run` for non-interactive auto-approval of all write operations
+- `StepVerifier` to validate each plan step before execution
+- Working memory + tool-result caching for the agent loop
+- Critic evaluation and correction pass after the tool loop completes
+- Past-session search and symbol index builder for richer context injection
+
+### Fixed
+- `--provider` CLI flag no longer inherits `baseUrl` from the active profile when switching providers (e.g. `--provider openai` no longer accidentally hits `localhost:11434`)
+- Removed unnecessary type assertions in `run.ts`
+- Removed unnecessary escape characters in `agent.ts`
+
 ## [0.2.0] - 2026-02-23
 
 ### Added
