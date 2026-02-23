@@ -134,6 +134,7 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
     // ── Agentic context-gathering phase ───────────────────────────────────────
     const useTools =
       options.tools !== false &&
+      adapter.info.supportsTools !== false &&
       typeof adapter.chatWithTools === 'function';
 
     // Build workspace context for better model reasoning
@@ -145,7 +146,12 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
     const systemPrompt =
       options.system ??
       profile.systemPrompt ??
-      (useTools ? buildSystemPrompt(jamContext, workspaceCtx) : undefined);
+      (useTools
+        ? buildSystemPrompt(jamContext, workspaceCtx)
+        : adapter.info.supportsTools === false
+          // Embedded / small model: lean prompt — just answer the question.
+          ? 'You are a helpful, knowledgeable AI assistant. Answer the user\'s question directly, concisely, and accurately. Format your response in clean Markdown when helpful.'
+          : undefined);
 
     if (useTools && adapter.chatWithTools) {
       const noColor = options.noColor ?? false;

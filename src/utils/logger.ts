@@ -59,3 +59,5 @@ export class Logger {
 
 // Singleton logger — configured at startup in src/index.ts
 export const logger = new Logger();
+
+// test small change

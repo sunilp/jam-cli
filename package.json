@@ -1,6 +1,6 @@
 {
   "name": "@sunilp-org/jam-cli",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Jam — developer-first AI assistant CLI for the terminal. Ask questions, explain code, review diffs, generate patches, and run agentic tasks powered by Ollama.",
   "type": "module",
   "license": "MIT",
@@ -11,7 +11,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/sunilp/jam-cli.git"
+    "url": "git+https://github.com/sunilp/jam-cli.git"
   },
   "bugs": {
     "url": "https://github.com/sunilp/jam-cli/issues"
@@ -36,7 +36,7 @@
     "node": ">=20"
   },
   "bin": {
-    "jam": "./dist/index.js"
+    "jam": "dist/index.js"
   },
   "files": [
     "dist",

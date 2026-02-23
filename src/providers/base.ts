@@ -56,6 +56,17 @@ export interface CompletionRequest {
 export interface ProviderInfo {
   name: string;
   supportsStreaming: boolean;
+  /**
+   * Whether this provider can reliably perform tool/function calling.
+   * Defaults to true when absent. Set to false for small/embedded models
+   * that cannot follow JSON tool-call instructions.
+   */
+  supportsTools?: boolean;
+  /**
+   * Maximum context window in tokens. Used to guard against input overflow
+   * on small/embedded models. Undefined means no enforced limit.
+   */
+  contextWindow?: number;
 }
 
 export interface ProviderAdapter {

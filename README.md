@@ -98,6 +98,15 @@ Most AI coding tools are built around a single vendor's model, require a browser
 
 ## Quick Start
 
+### Provider Support
+
+| Provider | Status | Notes |
+|----------|--------|-------|
+| **Ollama** | ✅ Default | Local inference via `ollama serve` |
+| **OpenAI** | ✅ Supported | Requires `OPENAI_API_KEY` |
+| **Groq** | ✅ Supported | Requires `GROQ_API_KEY` |
+| **Embedded** | ⚗️ Experimental | In-process via `node-llama-cpp`, no server needed |
+
 ### Prerequisites
 
 - **Node.js 20+**

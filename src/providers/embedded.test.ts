@@ -31,7 +31,6 @@ const mockGetLlama = vi.fn().mockResolvedValue({
 
 vi.mock('node-llama-cpp', () => ({
   getLlama: mockGetLlama,
-  downloadModel: vi.fn().mockResolvedValue(undefined),
   LlamaChatSession: vi.fn().mockImplementation(() => ({
     prompt: mockPrompt,
   })),
@@ -45,7 +44,7 @@ vi.mock('node:fs', async (importOriginal) => {
     ...actual,
     existsSync: vi.fn().mockReturnValue(true),
     mkdirSync: vi.fn(),
-    readdirSync: vi.fn().mockReturnValue(['smollm2-360m-instruct-q4_k_m.gguf']),
+    readdirSync: vi.fn().mockReturnValue(['smollm2-1.7b-instruct-q4_k_m.gguf']),
   };
 });
 
@@ -78,7 +77,7 @@ describe('EmbeddedAdapter', () => {
     const adapter = new EmbeddedAdapter();
     const models = await adapter.listModels();
     expect(models.length).toBeGreaterThan(0);
-    expect(models.some((m) => m.includes('smollm2-360m'))).toBe(true);
+    expect(models.some((m) => m.includes('smollm2-1.7b'))).toBe(true);
     expect(models.some((m) => m.includes('cached'))).toBe(true);
   });
 

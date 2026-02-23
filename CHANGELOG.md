@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-02-23
+
+### Added
+- **Embedded provider** (`--provider embedded`): run SmolLM2-1.7B fully in-process via `node-llama-cpp` — no external server needed
+- Default embedded model upgraded to `smollm2-1.7b-instruct-q4_k_m` (1.7B, q4_k_m) with 8192-token context window
+- One-time model download from GitHub releases with progress reporting
+- `jam commit --provider embedded` — commit message generation works offline with diff-stat fallback for large diffs
+- `supportsTools` / `contextWindow` fields on `ProviderInfo` for capability-aware routing
+- Lean system prompt path for small models that cannot follow tool-call JSON schemas
+
+### Fixed
+- Lint errors in embedded provider download stream handler (`Unsafe array destructuring` / `Unsafe member access`)
+
+## [0.1.2] - 2026
+
 ### Added
 - Initial release of Jam CLI
 - `jam ask` — one-shot AI questions with streaming output
