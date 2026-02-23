@@ -121,7 +121,7 @@ export function buildSystemPrompt(
   options: SystemPromptOptions = { mode: 'readonly' },
 ): string {
   const modeDesc = options.mode === 'readwrite'
-    ? 'You are an expert developer assistant with full read/write access to the local codebase via tools.'
+    ? 'You are an expert developer assistant with full read/write access to the local codebase via tools. Your job is to ACTUALLY WRITE CODE using tools, not just describe it. You MUST use write_file to create and modify files.'
     : 'You are an expert code assistant. You help developers understand their codebase by reading and searching source files.';
 
   return [
@@ -155,8 +155,16 @@ export function buildSystemPrompt(
     '- ALWAYS relate your findings back to the user\'s original question.',
     '- When you have gathered enough context, provide a clear, well-structured Markdown answer with code snippets.',
     ...(options.mode === 'readwrite' ? [
-      '- For write operations, explain what you are changing and why BEFORE making the change.',
-      '- Always validate changes after making them (e.g. read the file back to confirm).',
+      '',
+      '## Write Operations — MANDATORY RULES',
+      '',
+      '- YOU MUST USE `write_file` TOOL to create or modify files. This is the ONLY way to make changes.',
+      '- NEVER output code blocks in your final answer as a substitute for writing files. Code blocks are for explanation only.',
+      '- NEVER describe what a file "would look like" — write it with `write_file`.',
+      '- If asked to create a file, call `write_file` with the full, complete file content.',
+      '- If asked to modify an existing file, FIRST call `read_file` to get current content, THEN call `write_file` with the complete updated content.',
+      '- After every `write_file` call, call `read_file` on the same path to verify the write succeeded.',
+      '- When you have finished all writes, provide a short summary of what was changed (file paths only).',
     ] : []),
   ].filter(Boolean).join('\n');
 }
@@ -284,6 +292,59 @@ RULES:
 - 2 to 6 steps only
 - Output ONLY the raw JSON object. No markdown fences, no explanation.`;
 
+const STRUCTURED_WRITE_PLANNER_SYSTEM_PROMPT = `You are an execution planner for a developer assistant that reads AND writes code. Produce a precise, ordered JSON plan.
+
+Output a JSON object with EXACTLY this structure (no prose, no markdown, just JSON):
+{
+  "intent": "one sentence: what the user actually wants",
+  "steps": [
+    {
+      "id": 1,
+      "action": "Read an existing command (e.g. src/commands/ask.ts) to understand the command registration pattern",
+      "tool": "read_file",
+      "args": { "path": "src/commands/ask.ts" },
+      "successCriteria": "Understand the exact import structure and export pattern used by other commands"
+    },
+    {
+      "id": 2,
+      "action": "Read src/index.ts to see how commands are registered",
+      "tool": "read_file",
+      "args": { "path": "src/index.ts" },
+      "successCriteria": "Know exactly which lines to insert the import and registration"
+    },
+    {
+      "id": 3,
+      "action": "Create new file src/commands/version.ts using the pattern from step 1",
+      "tool": "write_file",
+      "args": { "path": "src/commands/version.ts", "content": "placeholder" },
+      "successCriteria": "File written with correct TypeScript matching the project pattern"
+    },
+    {
+      "id": 4,
+      "action": "Update src/index.ts to import and register the new version command",
+      "tool": "write_file",
+      "args": { "path": "src/index.ts", "content": "placeholder" },
+      "successCriteria": "src/index.ts updated with the new command fully integrated"
+    }
+  ],
+  "minStepsBeforeAnswer": 4,
+  "expectedFiles": ["src/commands/ask.ts", "src/index.ts", "src/commands/version.ts"]
+}
+
+RULES:
+- Steps MUST follow this order: (1) read reference files to understand patterns, (2) read files to be modified, (3) write/create new files, (4) update existing files with complete new content
+- ALWAYS include at least one read step of an EXISTING similar file to understand the pattern before writing anything
+- NEVER read a file you are about to create (it doesn't exist yet)
+- ALWAYS include a read step for every EXISTING file you will modify
+- When writing an existing file, the content must be the COMPLETE file (not stubs like \"// existing code...\") based on what you read
+- When creating a new file, the content must match the patterns found in the reference files you read
+- Allowed tools: search_text, read_file, list_dir, write_file, apply_patch
+- search_text args: { \"query\": \"actual_code_identifier\", \"glob\": \"*.ts\" }
+- read_file args: { \"path\": \"src/some/file.ts\" }
+- write_file args: { \"path\": \"src/some/file.ts\", \"content\": \"placeholder\" }  (executor will fill real content based on reads)
+- 3 to 8 steps
+- Output ONLY the raw JSON object. No markdown fences, no explanation.`;
+
 /**
  * Generate a structured, typed execution plan.
  * Falls back to null on parse failure — callers should fall back to generateSearchPlan.
@@ -292,7 +353,7 @@ export async function generateExecutionPlan(
   provider: ProviderAdapter,
   question: string,
   projectContext: string,
-  options: { model?: string; temperature?: number; maxTokens?: number },
+  options: { model?: string; temperature?: number; maxTokens?: number; mode?: 'readonly' | 'readwrite' },
 ): Promise<ExecutionPlan | null> {
   try {
     const request = {
@@ -310,7 +371,9 @@ export async function generateExecutionPlan(
       model: options.model,
       temperature: 0.1,
       maxTokens: 600,
-      systemPrompt: STRUCTURED_PLANNER_SYSTEM_PROMPT,
+      systemPrompt: options.mode === 'readwrite'
+        ? STRUCTURED_WRITE_PLANNER_SYSTEM_PROMPT
+        : STRUCTURED_PLANNER_SYSTEM_PROMPT,
     };
 
     let raw = '';
@@ -411,6 +474,8 @@ export function enrichUserPromptWithPlan(prompt: string, plan: ExecutionPlan): s
     )
     .join('\n\n');
 
+  const hasWriteSteps = plan.steps.some(s => s.tool === 'write_file' || s.tool === 'apply_patch');
+
   return [
     prompt,
     '',
@@ -430,8 +495,15 @@ export function enrichUserPromptWithPlan(prompt: string, plan: ExecutionPlan): s
     '## Instructions',
     '- Execute the steps above **in order**, using the exact tool and args listed.',
     '- Do not repeat a step you already completed.',
-    `- After completing at least ${plan.minStepsBeforeAnswer} steps, synthesize your final answer.`,
-    '- Final answer must be clean Markdown with specific file paths, line numbers, and code snippets.',
+    ...(hasWriteSteps ? [
+      '- **WRITE STEPS ARE MANDATORY**: For every step that uses `write_file` or `apply_patch`, you MUST call that tool with the complete file content.',
+      '- NEVER output code blocks as a substitute for calling `write_file`. Code blocks do nothing — only tool calls create files.',
+      '- After writing each file, call `read_file` on the same path to confirm the write succeeded.',
+      `- After completing all steps, output a short summary of what was written.`,
+    ] : [
+      `- After completing at least ${plan.minStepsBeforeAnswer} steps, synthesize your final answer.`,
+      '- Final answer must be clean Markdown with specific file paths, line numbers, and code snippets.',
+    ]),
     '- Do NOT output raw JSON. Do NOT ask clarifying questions — the plan tells you what to find.',
   ].filter(Boolean).join('\n');
 }
@@ -717,6 +789,11 @@ export class ToolCallTracker {
   }
 
   get totalCalls(): number { return this.history.length; }
+
+  /** Check if a specific tool was ever called in this session. */
+  wasToolCalled(name: string): boolean {
+    return this.history.some(h => h.name === name);
+  }
 
   /** Reset for a new turn (useful in multi-turn chat). */
   reset(): void {
