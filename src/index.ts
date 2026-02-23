@@ -86,7 +86,8 @@ program
 program
   .command('run [instruction]')
   .description('Execute a task workflow using AI and local tools')
-  .action(async (instruction: string | undefined) => {
+  .option('-y, --yes', 'auto-approve all write tool calls without prompting')
+  .action(async (instruction: string | undefined, cmdOpts: Record<string, unknown>) => {
     const g = globalOpts();
     const { runRun } = await import('./commands/run.js');
     await runRun(instruction, {
@@ -96,6 +97,7 @@ program
       baseUrl: g.baseUrl,
       noColor: g.color === false,
       quiet: g.quiet,
+      yes: cmdOpts['yes'] === true,
     });
   });
 

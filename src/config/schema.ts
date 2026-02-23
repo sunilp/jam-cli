@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const ToolPolicySchema = z.enum(['ask_every_time', 'allowlist', 'never']);
+export const ToolPolicySchema = z.enum(['ask_every_time', 'allowlist', 'never', 'always']);
 export type ToolPolicy = z.infer<typeof ToolPolicySchema>;
 
 export const ProfileSchema = z.object({

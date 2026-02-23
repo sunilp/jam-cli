@@ -16,7 +16,7 @@
 import { readdir } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { loadContextFile } from './context.js';
-import type { ProviderAdapter } from '../providers/base.js';
+import type { ProviderAdapter, Message } from '../providers/base.js';
 
 // ── ANSI helpers ──────────────────────────────────────────────────────────────
 
@@ -121,7 +121,7 @@ export function buildSystemPrompt(
   options: SystemPromptOptions = { mode: 'readonly' },
 ): string {
   const modeDesc = options.mode === 'readwrite'
-    ? 'You are an expert developer assistant with full read/write access to the local codebase via tools.'
+    ? 'You are an expert developer assistant with full read/write access to the local codebase via tools. Your job is to ACTUALLY WRITE CODE using tools, not just describe it. You MUST use write_file to create and modify files.'
     : 'You are an expert code assistant. You help developers understand their codebase by reading and searching source files.';
 
   return [
@@ -155,8 +155,16 @@ export function buildSystemPrompt(
     '- ALWAYS relate your findings back to the user\'s original question.',
     '- When you have gathered enough context, provide a clear, well-structured Markdown answer with code snippets.',
     ...(options.mode === 'readwrite' ? [
-      '- For write operations, explain what you are changing and why BEFORE making the change.',
-      '- Always validate changes after making them (e.g. read the file back to confirm).',
+      '',
+      '## Write Operations — MANDATORY RULES',
+      '',
+      '- YOU MUST USE `write_file` TOOL to create or modify files. This is the ONLY way to make changes.',
+      '- NEVER output code blocks in your final answer as a substitute for writing files. Code blocks are for explanation only.',
+      '- NEVER describe what a file "would look like" — write it with `write_file`.',
+      '- If asked to create a file, call `write_file` with the full, complete file content.',
+      '- If asked to modify an existing file, FIRST call `read_file` to get current content, THEN call `write_file` with the complete updated content.',
+      '- After every `write_file` call, call `read_file` on the same path to verify the write succeeded.',
+      '- When you have finished all writes, provide a short summary of what was changed (file paths only).',
     ] : []),
   ].filter(Boolean).join('\n');
 }
@@ -230,7 +238,418 @@ export async function generateSearchPlan(
   }
 }
 
-// ── Query expansion / prompt enrichment ───────────────────────────────────────
+// ── Structured Execution Plan ─────────────────────────────────────────────────
+
+/** One step in a structured execution plan. */
+export interface PlanStep {
+  /** Sequential step number starting at 1. */
+  id: number;
+  /** Human-readable description, e.g. "Search for createProvider in factory.ts". */
+  action: string;
+  /** Tool to use: 'search_text' | 'read_file' | 'list_dir'. */
+  tool: string;
+  /** Exact arguments to pass to the tool. */
+  args: Record<string, unknown>;
+  /** What constitutes success, e.g. "Found function signature in src/providers/factory.ts". */
+  successCriteria: string;
+}
+
+/** A structured execution plan produced by the planner LLM call. */
+export interface ExecutionPlan {
+  /** One-sentence restatement of what the user wants. */
+  intent: string;
+  /** Ordered steps to execute. */
+  steps: PlanStep[];
+  /** Planner's minimum number of steps before the executor should attempt an answer. */
+  minStepsBeforeAnswer: number;
+  /** Files likely to be relevant (hints for the executor). */
+  expectedFiles: string[];
+}
+
+const STRUCTURED_PLANNER_SYSTEM_PROMPT = `You are an execution planner for a code assistant. Produce a precise, ordered JSON plan for answering a question about a codebase.
+
+Output a JSON object with EXACTLY this structure (no prose, no markdown, just JSON):
+{
+  "intent": "one sentence: what the user actually wants",
+  "steps": [
+    {
+      "id": 1,
+      "action": "Search for createProvider function definition",
+      "tool": "search_text",
+      "args": { "query": "createProvider", "glob": "*.ts", "max_results": 10 },
+      "successCriteria": "Found the file and line where createProvider is defined"
+    }
+  ],
+  "minStepsBeforeAnswer": 2,
+  "expectedFiles": ["src/providers/factory.ts"]
+}
+
+RULES:
+- steps must only use tools: search_text, read_file, list_dir
+- search_text args: { "query": "...", "glob": "*.ts" }  (query MUST be a specific code identifier — function name, class name, import path, variable name — NEVER a generic English word)
+- read_file args: { "path": "src/some/file.ts" }
+- list_dir args: { "path": "src/some/" }
+- 2 to 6 steps only
+- Output ONLY the raw JSON object. No markdown fences, no explanation.`;
+
+const STRUCTURED_WRITE_PLANNER_SYSTEM_PROMPT = `You are an execution planner for a developer assistant that reads AND writes code. Produce a precise, ordered JSON plan.
+
+Output a JSON object with EXACTLY this structure (no prose, no markdown, just JSON):
+{
+  "intent": "one sentence: what the user actually wants",
+  "steps": [
+    {
+      "id": 1,
+      "action": "Read an existing command (e.g. src/commands/ask.ts) to understand the command registration pattern",
+      "tool": "read_file",
+      "args": { "path": "src/commands/ask.ts" },
+      "successCriteria": "Understand the exact import structure and export pattern used by other commands"
+    },
+    {
+      "id": 2,
+      "action": "Read src/index.ts to see how commands are registered",
+      "tool": "read_file",
+      "args": { "path": "src/index.ts" },
+      "successCriteria": "Know exactly which lines to insert the import and registration"
+    },
+    {
+      "id": 3,
+      "action": "Create new file src/commands/version.ts using the pattern from step 1",
+      "tool": "write_file",
+      "args": { "path": "src/commands/version.ts", "content": "placeholder" },
+      "successCriteria": "File written with correct TypeScript matching the project pattern"
+    },
+    {
+      "id": 4,
+      "action": "Update src/index.ts to import and register the new version command",
+      "tool": "write_file",
+      "args": { "path": "src/index.ts", "content": "placeholder" },
+      "successCriteria": "src/index.ts updated with the new command fully integrated"
+    }
+  ],
+  "minStepsBeforeAnswer": 4,
+  "expectedFiles": ["src/commands/ask.ts", "src/index.ts", "src/commands/version.ts"]
+}
+
+RULES:
+- Steps MUST follow this order: (1) read reference files to understand patterns, (2) read files to be modified, (3) write/create new files, (4) update existing files with complete new content
+- ALWAYS include at least one read step of an EXISTING similar file to understand the pattern before writing anything
+- NEVER read a file you are about to create (it doesn't exist yet)
+- ALWAYS include a read step for every EXISTING file you will modify
+- When writing an existing file, the content must be the COMPLETE file (not stubs like "// existing code...") based on what you read
+- When creating a new file, the content must match the patterns found in the reference files you read
+- Allowed tools: search_text, read_file, list_dir, write_file, apply_patch
+- search_text args: { "query": "actual_code_identifier", "glob": "*.ts" }
+- read_file args: { "path": "src/some/file.ts" }
+- write_file args: { "path": "src/some/file.ts", "content": "placeholder" }  (executor will fill real content based on reads)
+- 3 to 8 steps
+- Output ONLY the raw JSON object. No markdown fences, no explanation.`;
+
+/**
+ * Generate a structured, typed execution plan.
+ * Falls back to null on parse failure — callers should fall back to generateSearchPlan.
+ */
+export async function generateExecutionPlan(
+  provider: ProviderAdapter,
+  question: string,
+  projectContext: string,
+  options: { model?: string; temperature?: number; maxTokens?: number; mode?: 'readonly' | 'readwrite' },
+): Promise<ExecutionPlan | null> {
+  try {
+    const request = {
+      messages: [{
+        role: 'user' as const,
+        content: [
+          `Question: "${question}"`,
+          '',
+          'Project context:',
+          projectContext,
+          '',
+          'Produce a precise execution plan as a JSON object.',
+        ].join('\n'),
+      }],
+      model: options.model,
+      temperature: 0.1,
+      maxTokens: 600,
+      systemPrompt: options.mode === 'readwrite'
+        ? STRUCTURED_WRITE_PLANNER_SYSTEM_PROMPT
+        : STRUCTURED_PLANNER_SYSTEM_PROMPT,
+    };
+
+    let raw = '';
+    const stream = provider.streamCompletion(request);
+    for await (const chunk of stream) {
+      if (!chunk.done) raw += chunk.delta;
+    }
+
+    return parseExecutionPlan(raw.trim());
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Parse a JSON execution plan from the model's response.
+ * Handles markdown code-block wrappers and leading/trailing prose.
+ */
+export function parseExecutionPlan(text: string): ExecutionPlan | null {
+  // Strip markdown code block wrappers if present
+  let cleaned = text
+    .replace(/^```(?:json)?\s*/m, '')
+    .replace(/\s*```\s*$/m, '')
+    .trim();
+
+  // Find the outermost JSON object
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start === -1 || end === -1) return null;
+  cleaned = cleaned.slice(start, end + 1);
+
+  try {
+    const parsed: unknown = JSON.parse(cleaned);
+    return isValidExecutionPlan(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function isValidExecutionPlan(obj: unknown): obj is ExecutionPlan {
+  if (typeof obj !== 'object' || obj === null) return false;
+  const p = obj as Record<string, unknown>;
+  if (typeof p['intent'] !== 'string') return false;
+  if (!Array.isArray(p['steps']) || p['steps'].length === 0) return false;
+  if (typeof p['minStepsBeforeAnswer'] !== 'number') return false;
+  if (!Array.isArray(p['expectedFiles'])) return false;
+  for (const step of p['steps'] as unknown[]) {
+    if (typeof step !== 'object' || step === null) return false;
+    const s = step as Record<string, unknown>;
+    if (typeof s['id'] !== 'number') return false;
+    if (typeof s['action'] !== 'string') return false;
+    if (typeof s['tool'] !== 'string') return false;
+    if (typeof s['args'] !== 'object' || s['args'] === null) return false;
+    if (typeof s['successCriteria'] !== 'string') return false;
+  }
+  return true;
+}
+
+/**
+ * Format an ExecutionPlan as a visual block for stderr display.
+ */
+export function formatExecutionPlanBlock(plan: ExecutionPlan, noColor: boolean): string {
+  const lines = [
+    `Intent: ${plan.intent}`,
+    '',
+    ...plan.steps.flatMap(s => [
+      `Step ${s.id}: [${s.tool}] ${s.action}`,
+      `  args: ${JSON.stringify(s.args)}`,
+      `  ✓ ${s.successCriteria}`,
+      '',
+    ]),
+    `Min steps before answering: ${plan.minStepsBeforeAnswer}`,
+    ...(plan.expectedFiles.length > 0
+      ? [`Expected files: ${plan.expectedFiles.join(', ')}`]
+      : []),
+  ].filter(l => l !== undefined);
+
+  if (noColor) {
+    return lines.map(l => `  │ ${l}`).join('\n');
+  }
+  return lines
+    .map(l => `  ${ansi(ANSI.dimBlue, '│')} ${ansi(ANSI.dimBlue, l)}`)
+    .join('\n');
+}
+
+/**
+ * Enrich the user's prompt with a structured execution plan.
+ * Gives the model explicit, ordered steps with exact tool args so it does not meander.
+ */
+export function enrichUserPromptWithPlan(prompt: string, plan: ExecutionPlan): string {
+  const stepLines = plan.steps
+    .map(s =>
+      [
+        `**Step ${s.id}:** ${s.action}`,
+        `  - Tool: \`${s.tool}\` — args: \`${JSON.stringify(s.args)}\``,
+        `  - Done when: ${s.successCriteria}`,
+      ].join('\n')
+    )
+    .join('\n\n');
+
+  const hasWriteSteps = plan.steps.some(s => s.tool === 'write_file' || s.tool === 'apply_patch');
+
+  return [
+    prompt,
+    '',
+    '---',
+    '',
+    '## Execution Plan',
+    '',
+    `**Goal:** ${plan.intent}`,
+    '',
+    stepLines,
+    '',
+    `**Minimum ${plan.minStepsBeforeAnswer} step(s) required before answering.**`,
+    plan.expectedFiles.length > 0
+      ? `**Likely relevant files:** ${plan.expectedFiles.join(', ')}`
+      : '',
+    '',
+    '## Instructions',
+    '- Execute the steps above **in order**, using the exact tool and args listed.',
+    '- Do not repeat a step you already completed.',
+    ...(hasWriteSteps ? [
+      '- **WRITE STEPS ARE MANDATORY**: For every step that uses `write_file` or `apply_patch`, you MUST call that tool with the complete file content.',
+      '- NEVER output code blocks as a substitute for calling `write_file`. Code blocks do nothing — only tool calls create files.',
+      '- After writing each file, call `read_file` on the same path to confirm the write succeeded.',
+      `- After completing all steps, output a short summary of what was written.`,
+    ] : [
+      `- After completing at least ${plan.minStepsBeforeAnswer} steps, synthesize your final answer.`,
+      '- Final answer must be clean Markdown with specific file paths, line numbers, and code snippets.',
+    ]),
+    '- Do NOT output raw JSON. Do NOT ask clarifying questions — the plan tells you what to find.',
+  ].filter(Boolean).join('\n');
+}
+
+// ── Step Verifier ─────────────────────────────────────────────────────────────
+
+/** Result from the step verifier mid-process check. */
+export interface VerifierResult {
+  /** Whether the agent has enough context to answer, needs more, or is stuck. */
+  status: 'need-more' | 'ready-to-answer' | 'stuck';
+  /** Next step ID to focus on (1-based). 0 when ready-to-answer. */
+  nextStepId: number;
+  /** Brief explanation. */
+  reason: string;
+}
+
+const VERIFIER_SYSTEM_PROMPT = `You are a progress verifier for a code search agent.
+
+You receive: the user's question, the execution plan, and a summary of tool results collected so far.
+
+Determine the agent's status — output EXACTLY this format, nothing else:
+
+STATUS: ready-to-answer
+STEP: 0
+REASON: Found the factory in src/providers/factory.ts with all provider cases covered.
+
+or:
+
+STATUS: need-more
+STEP: 2
+REASON: Found function signature but haven't read the file body yet.
+
+or:
+
+STATUS: stuck
+STEP: 1
+REASON: All searches returned no results — the queries used generic words instead of code identifiers.
+
+Definitions:
+- ready-to-answer: tool results contain specific file paths, code snippets, or data that directly answers the question
+- need-more: some relevant info found but critical details still missing
+- stuck: 3+ rounds of tool calls with no relevant results found`;
+
+/**
+ * Mid-process verifier: checks every N rounds whether the agent has enough
+ * context to answer or is stuck. Enables early termination and targeted recovery.
+ */
+export class StepVerifier {
+  /**
+   * Run a cheap verifier LLM call against the current tool results.
+   * Non-fatal — returns 'need-more' on any failure.
+   */
+  async verify(
+    provider: ProviderAdapter,
+    question: string,
+    plan: ExecutionPlan | null,
+    toolResultsSummary: string,
+    options: { model?: string },
+  ): Promise<VerifierResult> {
+    const fallback: VerifierResult = { status: 'need-more', nextStepId: 1, reason: 'Verifier unavailable.' };
+    try {
+      const planText = plan
+        ? plan.steps.map(s => `Step ${s.id}: [${s.tool}] ${s.action}`).join('\n')
+        : '(no structured plan)';
+
+      const request = {
+        messages: [{
+          role: 'user' as const,
+          content: [
+            '## Question',
+            question,
+            '',
+            '## Execution Plan',
+            planText,
+            '',
+            '## Tool Results So Far',
+            toolResultsSummary || '(no results yet)',
+          ].join('\n'),
+        }],
+        model: options.model,
+        temperature: 0.1,
+        maxTokens: 80,
+        systemPrompt: VERIFIER_SYSTEM_PROMPT,
+      };
+
+      let raw = '';
+      const stream = provider.streamCompletion(request);
+      for await (const chunk of stream) {
+        if (!chunk.done) raw += chunk.delta;
+      }
+
+      return this.parseVerifierResponse(raw.trim()) ?? fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  /** Parse the verifier's structured response. Exported for testing. */
+  parseVerifierResponse(text: string): VerifierResult | null {
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length === 0) return null;
+
+    const statusLine = lines.find(l => /^STATUS:/i.test(l));
+    const stepLine   = lines.find(l => /^STEP:/i.test(l));
+    const reasonLine = lines.find(l => /^REASON:/i.test(l));
+
+    if (!statusLine) return null;
+
+    const raw = statusLine.replace(/^STATUS:\s*/i, '').trim().toLowerCase();
+    let status: VerifierResult['status'];
+    if (raw.includes('ready')) status = 'ready-to-answer';
+    else if (raw.includes('stuck')) status = 'stuck';
+    else status = 'need-more';
+
+    const nextStepId = stepLine
+      ? (parseInt(stepLine.replace(/^STEP:\s*/i, '').trim(), 10) || 0)
+      : 0;
+
+    const reason = reasonLine
+      ? reasonLine.replace(/^REASON:\s*/i, '').trim()
+      : 'No reason provided.';
+
+    return { status, nextStepId, reason };
+  }
+}
+
+/**
+ * Extract a summary of the most recent tool results from the message history.
+ * Fed to the StepVerifier so it can assess progress without the full context.
+ */
+export function buildToolResultsSummary(messages: Message[]): string {
+  const toolMsgs = messages
+    .filter(m => m.role === 'user' && m.content.startsWith('[Tool result:'))
+    .slice(-6);
+
+  if (toolMsgs.length === 0) return '';
+
+  return toolMsgs
+    .map(m => {
+      const content = m.content;
+      return content.length > 300 ? content.slice(0, 300) + '…' : content;
+    })
+    .join('\n\n');
+}
+
+// ── Query expansion / prompt enrichment ────────────────────────────────────────
 
 /**
  * Enrich the user's prompt with search strategy guidance.
@@ -370,6 +789,11 @@ export class ToolCallTracker {
   }
 
   get totalCalls(): number { return this.history.length; }
+
+  /** Check if a specific tool was ever called in this session. */
+  wasToolCalled(name: string): boolean {
+    return this.history.some(h => h.name === name);
+  }
 
   /** Reset for a new turn (useful in multi-turn chat). */
   reset(): void {
