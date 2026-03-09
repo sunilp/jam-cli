@@ -203,6 +203,88 @@ describe('runCommit', () => {
     ]);
 
     await expect(runCommit({})).rejects.toThrow('process.exit called');
-    expect(printError).toHaveBeenCalledWith(expect.stringContaining('git diff'));
+    expect(printError).toHaveBeenCalledWith(expect.stringContaining('git diff'), expect.anything());
+  });
+});
+
+// ── Tests for convention detection and prompt building (pure functions) ──────
+// These use the real (unmocked) module via dynamic import inside each test.
+
+describe('buildCommitSystemPrompt', () => {
+  it('builds prompt with explicit config convention', async () => {
+    const { buildCommitSystemPrompt } = await import('./commit.js');
+    const prompt = buildCommitSystemPrompt(
+      { format: '{ticket}: {type}: {description}', ticketPattern: 'PROJ-\\d+', ticketRequired: true },
+      null,
+      false,
+    );
+    expect(prompt).toContain('{ticket}: {type}: {description}');
+    expect(prompt).toContain('Ticket is REQUIRED');
+    expect(prompt).toContain('PROJ-\\d+');
+  });
+
+  it('builds prompt from detected convention', async () => {
+    const { buildCommitSystemPrompt } = await import('./commit.js');
+    const prompt = buildCommitSystemPrompt(
+      undefined,
+      {
+        format: '{ticket}: {description}',
+        ticketPattern: '[A-Z]{2,10}-\\d+',
+        types: ['feat', 'fix'],
+        examples: ['JIRA-123: add login page', 'JIRA-456: fix button alignment'],
+      },
+      false,
+    );
+    expect(prompt).toContain('{ticket}: {description}');
+    expect(prompt).toContain('JIRA-123: add login page');
+    expect(prompt).toContain('feat, fix');
+  });
+
+  it('falls back to defaults when no convention', async () => {
+    const { buildCommitSystemPrompt } = await import('./commit.js');
+    const prompt = buildCommitSystemPrompt(undefined, null, false);
+    expect(prompt).toContain('<type>(<scope>): <short description>');
+  });
+
+  it('produces compact prompt for small models', async () => {
+    const { buildCommitSystemPrompt } = await import('./commit.js');
+    const prompt = buildCommitSystemPrompt(
+      { format: '{ticket}: {description}' },
+      null,
+      true,
+    );
+    expect(prompt).toContain('under 72 characters');
+    expect(prompt).not.toContain('Placeholders');
+  });
+
+  it('includes custom rules from config', async () => {
+    const { buildCommitSystemPrompt } = await import('./commit.js');
+    const prompt = buildCommitSystemPrompt(
+      { rules: ['Always reference the module name in scope', 'Use past tense for descriptions'] },
+      null,
+      false,
+    );
+    expect(prompt).toContain('Always reference the module name in scope');
+    expect(prompt).toContain('Use past tense for descriptions');
+  });
+});
+
+describe('cleanCommitMessage — ticket patterns', () => {
+  it('extracts JIRA-prefixed commit message', async () => {
+    const { cleanCommitMessage } = await import('./commit.js');
+    const result = cleanCommitMessage('Here is the commit message:\n\nPROJ-123: add user auth flow');
+    expect(result).toBe('PROJ-123: add user auth flow');
+  });
+
+  it('extracts bracket-ticket commit message', async () => {
+    const { cleanCommitMessage } = await import('./commit.js');
+    const result = cleanCommitMessage('Based on the diff:\n[TEAM-456] fix null pointer in handler');
+    expect(result).toBe('[TEAM-456] fix null pointer in handler');
+  });
+
+  it('still extracts conventional commits', async () => {
+    const { cleanCommitMessage } = await import('./commit.js');
+    const result = cleanCommitMessage('The commit message is:\nfeat(auth): add OAuth2 support');
+    expect(result).toBe('feat(auth): add OAuth2 support');
   });
 });

@@ -26,9 +26,9 @@
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 [![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-yellow.svg)](https://conventionalcommits.org)
 
-Ask questions • Explain code • Review diffs • Generate patches • Run agentic tasks
+Ask questions · Trace call graphs · Review diffs · Generate patches · Run agentic tasks · Connect to Jira
 
-*All from your command line, powered by Ollama, OpenAI, Groq, or any compatible provider.*
+*All from your command line, powered by Ollama, OpenAI, Anthropic, Groq, or any compatible provider.*
 
 [Getting Started](#quick-start) · [Commands](#commands) · [Configuration](#configuration) · [Contributing](#contributing) · [Security](#security-policy)
 
@@ -57,10 +57,16 @@ Most AI coding tools are built around a single vendor's model, require a browser
 | ⚡ | **Streaming output** | Responses begin rendering on the first token |
 | 💬 | **Interactive chat** | Multi-turn sessions with history and resume |
 | 📂 | **Repo-aware** | Explain files, search code, review diffs with full workspace context |
+| 🔍 | **Call graph tracing** | `jam trace` maps any symbol's callers, callees, imports, and upstream chain with Mermaid diagrams |
 | 🩹 | **Patch workflow** | Generate unified diffs, validate, preview, and apply with confirmation |
-| 🤖 | **Structured agent** | `jam run` uses a typed plan-then-execute loop: the model plans steps first, then executes with read-before-write safety and shrinkage guards |
-| 🔌 | **Pluggable providers** | Ollama, OpenAI, Groq, **Embedded** built-in; adapter pattern for adding any LLM |
-| 📦 | **Embedded inference** | **[Experimental]** Run without Ollama — tiny GGUF model runs directly in-process via `node-llama-cpp` |
+| 🤖 | **Structured agent** | `jam run` uses a typed plan-then-execute loop with read-before-write safety and shrinkage guards |
+| 🎫 | **Jira integration** | Browse assigned issues, auto-create branches, generate implementation plans |
+| ✅ | **Verification pipeline** | `jam verify` scans for secrets, runs checks, and assesses risk before you ship |
+| 📝 | **Smart commits** | Auto-detects your project's commit convention (Conventional Commits, JIRA prefixes, etc.) |
+| 🔌 | **5 providers** | Ollama, OpenAI, Anthropic, Groq, Embedded — adapter pattern for adding any LLM |
+| 🧠 | **Auto-detection** | `--model claude-sonnet-4-20250514` auto-selects the right provider — no `--provider` needed |
+| 💾 | **Response caching** | Identical prompts return cached results instantly — saves API calls and money |
+| 📦 | **Embedded inference** | **[Experimental]** Tiny GGUF model runs directly in-process via `node-llama-cpp` |
 | ⚙️ | **Layered config** | Global → repo → CLI flags; multiple named profiles |
 | 🔐 | **Secure secrets** | OS keychain via keytar, env var fallback |
 | 🐚 | **Shell completions** | Bash and Zsh |
@@ -105,8 +111,17 @@ Most AI coding tools are built around a single vendor's model, require a browser
 |----------|--------|-------|
 | **Ollama** | ✅ Default | Local inference via `ollama serve` |
 | **OpenAI** | ✅ Supported | Requires `OPENAI_API_KEY` |
+| **Anthropic** | ✅ Supported | Requires `ANTHROPIC_API_KEY`; Claude models with tool calling |
 | **Groq** | ✅ Supported | Requires `GROQ_API_KEY` |
 | **Embedded** | ⚗️ Experimental | In-process via `node-llama-cpp`, no server needed |
+
+**Provider auto-detection:** You don't need to specify `--provider` if you pass a model name. Jam infers the provider automatically:
+
+```bash
+jam ask "Hello" --model claude-sonnet-4-20250514    # → anthropic
+jam ask "Hello" --model gpt-4o                  # → openai
+jam ask "Hello" --model llama-3.1-8b-instant    # → groq
+```
 
 ### Prerequisites
 
@@ -137,16 +152,28 @@ npm run build
 npm link          # makes `jam` available globally
 ```
 
-### Verify
+### First Run
 
 ```bash
+jam init          # interactive setup — detects providers, creates .jamrc + JAM.md
 jam doctor        # checks Node version, config, provider connectivity, ripgrep
-jam auth login    # validates connection to Ollama
+jam auth login    # validates connection to the configured provider
 ```
 
 ---
 
 ## Commands
+
+### `jam init`
+
+Interactive onboarding wizard. Detects available providers (Ollama running? API keys set?), lets you choose, creates `.jamrc` and `JAM.md`, and verifies connectivity.
+
+```bash
+jam init              # interactive provider selection + config creation
+jam init --yes        # auto-select the best available provider
+```
+
+---
 
 ### `jam ask`
 
@@ -164,8 +191,8 @@ jam ask --file prompt.txt
 # JSON output (full response + token usage)
 jam ask "What is 2+2?" --json
 
-# Override model
-jam ask "Hello" --model codellama
+# Override model (provider auto-detected)
+jam ask "Hello" --model claude-sonnet-4-20250514
 
 # Use a named profile
 jam ask "Hello" --profile work
@@ -207,6 +234,71 @@ jam chat --resume <sessionId>    # resume a previous session
 | `Ctrl-C` (twice) | Exit chat |
 
 Sessions are saved automatically to `~/.local/share/jam/sessions/` (macOS: `~/Library/Application Support/jam/sessions/`).
+
+---
+
+### `jam trace`
+
+Trace the complete call graph of any function, class, or symbol across the codebase. Shows definition, callers, callees, import chain, upstream caller hierarchy, and a Mermaid diagram — all by default.
+
+```bash
+jam trace createProvider                # full trace with AI analysis + Mermaid diagram
+jam trace JamError --depth 1            # shallow upstream chain
+jam trace loadConfig --no-ai            # skip AI, just show the graph
+jam trace buildCallGraph --json         # structured JSON output
+```
+
+**Example output:**
+
+```
+  Call Graph
+  ────────────────────────────────────────────────────────────
+
+  createProvider(profile: Profile) → Promise<ProviderAdapter>
+    Defined: src/providers/factory.ts:30  [function]
+
+    Imported by:
+    │ src/commands/ask.ts:3
+    │ src/commands/commit.ts:5
+    │ src/commands/diff.ts:4
+    ...
+
+    Called from:
+    ├─ src/commands/ask.ts:138      createProvider(profile)
+    ├─ src/commands/commit.ts:413   createProvider(profile)
+    ├─ src/commands/diff.ts:56      createProvider(profile)
+    └─ src/commands/run.ts:72       createProvider(profile)
+
+    Calls into:
+    ├─ OllamaAdapter({)    [(workspace)]
+    ├─ OpenAIAdapter({)    [(workspace)]
+    ├─ AnthropicAdapter({) [(workspace)]
+    └─ GroqAdapter({)      [(workspace)]
+
+  Mermaid Diagram
+  ────────────────────────────────────────────────────────────
+
+  ```mermaid
+  graph TD
+    createProvider["createProvider ..."]
+    ask["ask.ts:138"] --> createProvider
+    commit["commit.ts:413"] --> createProvider
+    ...
+  ```
+
+  AI Analysis
+  ────────────────────────────────────────────────────────────
+
+  **Flow Summary:** createProvider is the central factory for LLM adapters...
+```
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--depth <n>` | Upstream chain depth (default: 3) |
+| `--no-ai` | Skip AI analysis, show only the graph |
+| `--json` | Output the raw call graph as JSON |
 
 ---
 
@@ -281,13 +373,38 @@ jam review --json                 # JSON output
 
 ### `jam commit`
 
-Generate an AI-written commit message from staged changes and commit.
+Generate an AI-written commit message from staged changes and commit. Jam auto-detects your project's commit convention from git history — Conventional Commits, JIRA prefixes (`PROJ-123: ...`), bracket tickets (`[PROJ-123] ...`), or any consistent pattern.
 
 ```bash
 jam commit                 # generate message, confirm, then commit
 jam commit --dry           # generate message only, do not commit
 jam commit --yes           # skip confirmation prompt
 jam commit --amend         # amend the last commit with a new AI message
+```
+
+**Convention detection:**
+
+Jam samples the last 20 commits and detects the dominant pattern:
+
+```
+Detected convention: {ticket}: {type}({scope}): {description}
+Generating commit message...
+
+  PROJ-456: feat(auth): add OAuth2 token refresh
+```
+
+You can also configure conventions explicitly in `.jamrc`:
+
+```json
+{
+  "commitConvention": {
+    "format": "{ticket}: {type}: {description}",
+    "ticketPattern": "PROJ-\\d+",
+    "ticketRequired": true,
+    "types": ["feat", "fix", "chore", "docs"],
+    "rules": ["Always reference the module name in scope"]
+  }
+}
 ```
 
 **Options:**
@@ -298,7 +415,33 @@ jam commit --amend         # amend the last commit with a new AI message
 | `--yes` | Auto-confirm without prompting |
 | `--amend` | Amend the last commit with a new AI-generated message |
 
-Messages follow the [Conventional Commits](https://conventionalcommits.org) specification.
+---
+
+### `jam verify`
+
+Validation pipeline for changes. Runs checks, scans for secrets, and assesses risk before you ship.
+
+```bash
+jam verify                          # verify current working tree changes
+jam verify --staged                 # verify only staged changes
+jam verify --base main              # diff against a base branch
+jam verify --json                   # structured JSON report
+jam verify --fail-on-risk high      # exit 1 if risk >= high (for CI)
+jam verify --no-ai                  # skip AI risk assessment
+```
+
+**Checks run:**
+
+| Check | Weight | What it does |
+|-------|--------|-------------|
+| Diff sanity | — | Verifies changes exist and aren't too large |
+| Secret scan | 0.4 | 10 patterns: API keys, tokens, passwords, private keys, connection strings |
+| Typecheck | 0.2 | Runs `tsc --noEmit` (if tsconfig exists) |
+| Lint | 0.1 | Runs the project's lint command |
+| Tests | 0.25 | Runs the project's test suite |
+| AI risk review | — | LLM analyzes the diff for security, logic, and quality issues |
+
+**Risk levels:** `low` → `medium` → `high` → `critical`, computed from weighted check failures.
 
 ---
 
@@ -343,7 +486,6 @@ jam run --yes "Rename all occurrences of userId to accountId"  # auto-approve wr
 | `--model <id>` | Override model for this task |
 | `--provider <name>` | Override provider |
 | `--profile <name>` | Use a named config profile |
-| `--json` | Machine-readable JSON output |
 
 **How it works:**
 
@@ -367,6 +509,68 @@ jam run --yes "Rename all occurrences of userId to accountId"  # auto-approve wr
 | `run_command` | **Write** | Execute a shell command (dangerous patterns blocked; prompts for confirmation) |
 
 Write tools require confirmation unless `toolPolicy` is set to `always` or `allowlist` in config.
+
+---
+
+### `jam jira`
+
+Connect to Jira (Cloud or on-prem Server/Data Center), browse assigned issues, and start working with AI-generated implementation plans.
+
+```bash
+jam jira issues                           # list issues assigned to you
+jam jira issues --status "In Progress"    # filter by status
+jam jira issues --json                    # JSON output
+jam jira view PROJ-123                    # view full issue details
+jam jira view PROJ-123 --json             # JSON output
+jam jira start PROJ-123                   # fetch issue, create branch, generate plan
+jam jira start PROJ-123 --no-branch       # skip branch creation
+```
+
+**`jam jira start` flow:**
+
+1. Fetches full issue details (description, subtasks, comments)
+2. Creates a git branch from the issue key and summary (e.g. `proj-123-add-user-authentication`)
+3. Generates an AI implementation plan: summary, key files, steps, testing, edge cases
+4. Suggests the next step: `jam run "Implement PROJ-123: ..."`
+
+**Configuration** (in `.jamrc`):
+
+```json
+{
+  "jira": {
+    "baseUrl": "https://jira.company.com",
+    "email": "you@company.com",
+    "branchTemplate": "{type}/{key}-{summary}",
+    "defaultJql": "project = MYPROJ"
+  }
+}
+```
+
+Set your token: `export JIRA_API_TOKEN=<your-token>` (or `apiToken` in config).
+
+Branch templates support `{key}`, `{type}` (mapped: Bug→fix, Story→feat, Task→chore), and `{summary}`.
+
+---
+
+### `jam cache`
+
+Manage the response cache. Identical prompts return cached results instantly, saving API calls.
+
+```bash
+jam cache stats            # show entry count, size, TTL, age range
+jam cache stats --json     # structured JSON
+jam cache clear            # delete all cached responses
+jam cache prune            # remove only expired entries
+```
+
+Caching is enabled by default with a 1-hour TTL. Configure in `.jamrc`:
+
+```json
+{
+  "cacheEnabled": true,
+  "cacheTtlSeconds": 3600
+}
+```
 
 ---
 
@@ -440,7 +644,7 @@ jam doctor
 ```
 
 Checks:
-- Node.js version (≥ 20)
+- Node.js version (>= 20)
 - Config file is valid
 - Provider connectivity (Ollama reachable)
 - ripgrep availability (optional, JS fallback used if absent)
@@ -462,10 +666,10 @@ Jam merges config in priority order (highest wins):
 5. Built-in defaults
 ```
 
-> **Recommended:** Use `~/.jam/config.json` for your personal settings (provider, API keys, default model).  
+> **Recommended:** Use `~/.jam/config.json` for your personal settings (provider, API keys, default model).
 > Use `.jam/config.json` at the repo root for project-specific overrides (tool policy, redact patterns).
 
-### Config Schema
+### Full Config Example
 
 ```json
 {
@@ -479,10 +683,13 @@ Jam merges config in priority order (highest wins):
       "maxTokens": 4096,
       "systemPrompt": "You are a helpful coding assistant."
     },
+    "cloud": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-20250514"
+    },
     "fast": {
-      "provider": "ollama",
-      "model": "qwen2.5-coder:1.5b",
-      "baseUrl": "http://localhost:11434"
+      "provider": "groq",
+      "model": "llama-3.1-8b-instant"
     },
     "embedded": {
       "provider": "embedded",
@@ -493,7 +700,20 @@ Jam merges config in priority order (highest wins):
   "toolAllowlist": [],
   "historyEnabled": true,
   "logLevel": "warn",
-  "redactPatterns": ["sk-[a-z0-9]+", "Bearer\\s+\\S+"]
+  "redactPatterns": ["sk-[a-z0-9]+", "Bearer\\s+\\S+"],
+  "cacheEnabled": true,
+  "cacheTtlSeconds": 3600,
+  "commitConvention": {
+    "format": "{type}({scope}): {description}",
+    "types": ["feat", "fix", "chore", "docs", "refactor", "test"],
+    "autoDetect": true
+  },
+  "jira": {
+    "baseUrl": "https://jira.company.com",
+    "email": "you@company.com",
+    "branchTemplate": "{type}/{key}-{summary}",
+    "defaultJql": "project = MYPROJ"
+  }
 }
 ```
 
@@ -508,69 +728,61 @@ Jam merges config in priority order (highest wins):
 | `historyEnabled` | boolean | `true` | Save chat sessions to disk |
 | `logLevel` | `silent` \| `error` \| `warn` \| `info` \| `debug` | `warn` | Log verbosity |
 | `redactPatterns` | string[] | `[]` | Regex patterns redacted from logs |
+| `cacheEnabled` | boolean | `true` | Enable response caching |
+| `cacheTtlSeconds` | number | `3600` | Cache time-to-live in seconds |
 
 ### Profile Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `provider` | string | Provider name (`ollama`, `openai`, `groq`, `embedded`) |
-| `model` | string | Model ID (e.g. `llama3.2`, `codellama`) |
+| `provider` | string | Provider name (`ollama`, `openai`, `anthropic`, `groq`, `embedded`) |
+| `model` | string | Model ID (e.g. `llama3.2`, `claude-sonnet-4-20250514`, `gpt-4o`) |
 | `baseUrl` | string | Provider API base URL |
 | `apiKey` | string | API key (prefer keychain or env vars) |
-| `temperature` | number | Sampling temperature (0–2) |
+| `temperature` | number | Sampling temperature (0-2) |
 | `maxTokens` | number | Max tokens in response |
 | `systemPrompt` | string | Default system prompt |
+
+### Commit Convention Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `format` | string | Message format template with `{type}`, `{scope}`, `{description}`, `{ticket}` placeholders |
+| `types` | string[] | Allowed commit types (e.g. `feat`, `fix`, `chore`) |
+| `ticketPattern` | string | Regex for ticket IDs (e.g. `"PROJ-\\d+"`) |
+| `ticketRequired` | boolean | Whether ticket IDs are mandatory |
+| `rules` | string[] | Extra instructions for the AI |
+| `autoDetect` | boolean | Auto-detect convention from git history (default: true) |
+
+### Jira Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `baseUrl` | string | Jira instance URL (Cloud or on-prem) |
+| `email` | string | Your Jira email (Cloud) or username (Server) |
+| `apiToken` | string | API token (or set `JIRA_API_TOKEN` env var) |
+| `defaultJql` | string | Default JQL filter appended to queries |
+| `branchTemplate` | string | Branch name template with `{key}`, `{type}`, `{summary}` (default: `{key}-{summary}`) |
 
 ### Initialize Config
 
 ```bash
-# User-level — creates ~/.jam/config.json (recommended)
-jam config init --global
+# Guided setup — detects providers, creates config + JAM.md
+jam init
 
-# Repo-level — creates .jam/config.json (committed to version control)
-jam config init
-```
-
-The global config at `~/.jam/config.json` is the best place to set your default provider, model, API keys, and personal preferences. Edit it directly:
-
-```bash
-# Example: switch default provider to embedded
-vim ~/.jam/config.json
-```
-
-```json
-{
-  "defaultProfile": "default",
-  "profiles": {
-    "default": {
-      "provider": "ollama",
-      "model": "llama3.2",
-      "baseUrl": "http://localhost:11434"
-    },
-    "openai": {
-      "provider": "openai",
-      "model": "gpt-4o-mini",
-      "apiKey": "sk-..."
-    },
-    "offline": {
-      "provider": "embedded",
-      "model": "smollm2-360m"
-    }
-  },
-  "toolPolicy": "ask_every_time",
-  "historyEnabled": true,
-  "logLevel": "warn"
-}
+# Or manual config creation:
+jam config init --global   # creates ~/.config/jam/config.json
+jam config init            # creates .jam/config.json (repo-level)
 ```
 
 ### Using Profiles
 
 ```bash
 # Use a specific profile
-jam ask "Hello" --profile fast
+jam ask "Hello" --profile cloud
 
-# Switch default in config
-echo '{"defaultProfile": "fast"}' > .jamrc
+# Or auto-detect from model name
+jam ask "Hello" --model claude-sonnet-4-20250514    # auto-selects anthropic provider
 ```
 
 ---
@@ -582,13 +794,15 @@ echo '{"defaultProfile": "fast"}' > .jamrc
 | `JAM_API_KEY` | API key fallback (if keytar unavailable) |
 | `JAM_BASE_URL` | Override provider base URL |
 | `OPENAI_API_KEY` | OpenAI API key (used when `provider: openai`) |
+| `ANTHROPIC_API_KEY` | Anthropic API key (used when `provider: anthropic`) |
 | `GROQ_API_KEY` | Groq API key (used when `provider: groq`) |
+| `JIRA_API_TOKEN` | Jira API token for `jam jira` commands |
 
 ---
 
-## Embedded Provider — Experimental ⚗️
+## Embedded Provider — Experimental
 
-> **⚠️ EXPERIMENTAL** — The embedded provider is functional but quality is limited by small model sizes. For production workloads, use Ollama or OpenAI.
+> **EXPERIMENTAL** — The embedded provider is functional but quality is limited by small model sizes. For production workloads, use Ollama or OpenAI.
 
 The `embedded` provider runs a tiny GGUF model **directly in-process** via [`node-llama-cpp`](https://github.com/withcatai/node-llama-cpp). No Ollama installation, no server process, no network calls. **Models are only downloaded when you explicitly set `provider: "embedded"`** — it never downloads anything unless you opt in.
 
@@ -625,18 +839,6 @@ jam ask "Explain git rebase" --provider embedded --model smollm2-1.7b
 
 # Or point to any local GGUF file
 jam ask "Hello" --provider embedded --model /path/to/custom-model.gguf
-
-# Profile-based setup
-# In ~/.jam/config.json:
-# {
-#   "profiles": {
-#     "offline": {
-#       "provider": "embedded",
-#       "model": "smollm2-1.7b"
-#     }
-#   }
-# }
-jam ask "Hello" --profile offline
 ```
 
 ### When to Use Embedded vs Ollama
@@ -659,7 +861,7 @@ npm run dev -- ask "What is 2+2?"   # run from source with tsx
 npm run build                         # compile TypeScript to dist/
 npm run typecheck                     # tsc --noEmit
 npm run lint                          # ESLint
-npm test                              # Vitest unit tests
+npm test                              # Vitest unit tests (289 tests)
 npm run test:watch                    # watch mode
 npm run test:coverage                 # coverage report
 ```
@@ -668,14 +870,15 @@ npm run test:coverage                 # coverage report
 
 ```
 src/
-├── index.ts        # CLI entry point — command registration (Commander)
-├── commands/       # One file per command (ask, chat, run, review, commit, …)
-├── providers/      # LLM adapter layer — ProviderAdapter interface + Ollama, Embedded impl
-├── tools/          # Model-callable tools + registry + permission enforcement
-├── config/         # Zod schema, cosmiconfig loader, built-in defaults
-├── storage/        # Chat session persistence (JSON files)
-├── ui/             # Ink/React TUI (chat REPL) + Markdown/streaming renderer
-└── utils/          # Shared helpers: streaming, logger, secrets, agent loop, tokens
+├── index.ts           # CLI entry point — command registration (Commander)
+├── commands/          # One file per command (ask, chat, run, trace, verify, jira, …)
+├── providers/         # LLM adapters — Ollama, OpenAI, Anthropic, Groq, Embedded
+├── integrations/      # External service clients (Jira)
+├── tools/             # Model-callable tools + registry + permission enforcement
+├── config/            # Zod schema, cosmiconfig loader, built-in defaults
+├── storage/           # Chat sessions + response cache (file-based)
+├── ui/                # Ink/React TUI (chat REPL) + Markdown/streaming renderer
+└── utils/             # Shared: streaming, call-graph, agent loop, tokens, secrets, logger
 ```
 
 ---
@@ -705,7 +908,13 @@ if (provider === 'myprovider') {
 }
 ```
 
-3. Use: `jam ask "Hello" --provider myprovider`
+3. (Optional) Add auto-detection in `inferProviderFromModel()`:
+
+```typescript
+if (m.startsWith('my-model-')) return 'myprovider';
+```
+
+4. Use: `jam ask "Hello" --provider myprovider`
 
 ---
 
@@ -730,7 +939,7 @@ Look for issues labeled [`good first issue`](https://github.com/sunilp/jam-cli/l
 ### What the Codebase Looks Like
 
 - **Strict TypeScript throughout** — no `any`, no guessing what a function does
-- **Tests colocated with source** — `foo.ts` → `foo.test.ts`, using Vitest
+- **Tests colocated with source** — `foo.ts` → `foo.test.ts`, using Vitest (289 tests across 23 files)
 - **One file per concern** — each command, provider, and tool is self-contained
 - **Zod schema validation** — config is validated at load time, not at runtime when it's too late
 - **Conventional Commits** — the git log tells the story of the project
@@ -755,12 +964,23 @@ We take security seriously. If you discover a vulnerability, please **do not** o
 
 ## Roadmap
 
+- [x] Ollama provider (default)
 - [x] OpenAI provider
-- [ ] Azure OpenAI provider
-- [ ] Anthropic Claude provider
+- [x] Anthropic Claude provider
 - [x] Groq provider
+- [x] Embedded provider (experimental)
+- [x] Provider auto-detection from model name
+- [x] Structured plan-then-execute agent (`jam run`)
+- [x] Smart commit conventions (auto-detect + config)
+- [x] Jira integration (`jam jira`)
+- [x] Verification pipeline (`jam verify`)
+- [x] Call graph tracing (`jam trace`)
+- [x] Response caching (`jam cache`)
+- [x] Actionable error messages with hints
+- [ ] MCP (Model Context Protocol) support
 - [ ] Plugin system for custom tools
 - [ ] Token usage tracking and budgets
+- [ ] Embeddings & vector search
 - [ ] Web UI companion
 
 ---
@@ -769,227 +989,50 @@ We take security seriously. If you discover a vulnerability, please **do not** o
 
 > Ideas and directions under consideration. These range from quick wins to deep architectural changes. Contributions, RFCs, and discussion on any of these are welcome.
 
-### 🧩 Plugin System
+### Plugin System
 
 The tool registry (`ToolRegistry.register()`) already accepts any `ToolDefinition`, but tool discovery is hardcoded. A proper plugin system would allow external tools without modifying source.
 
 - **Local plugins** — load `ToolDefinition` modules from `.jam/plugins/` or `~/.config/jam/plugins/`
 - **npm plugin packages** — `jam plugin install @scope/jam-plugin-docker` discovers and registers tools at startup
 - **Plugin manifest** — declarative `jam-plugin.json` with name, version, tool definitions, required permissions
-- **Lifecycle hooks** — `onActivate`, `onDeactivate`, `beforeToolCall`, `afterToolCall` for plugin-level middleware
 - **Sandboxed execution** — plugins run with restricted filesystem/network access based on declared capabilities
 
-```
-jam plugin install jam-plugin-docker
-jam plugin list
-jam plugin remove jam-plugin-docker
-```
+### Skills
 
-### 🎯 Skills
+Skills are named, composable mini-agents — each with a focused system prompt, a curated tool subset, and a defined output contract.
 
-Skills are named, composable mini-agents — each with a focused system prompt, a curated tool subset, and a defined output contract. Think of them as recipes the model can invoke.
-
-- **Built-in skills** — `refactor`, `test-writer`, `documenter`, `security-audit`, `dependency-update`, `migration`
-- **Skill registry** — each skill declares its name, description, required tools, system prompt template, and output schema
-- **Composable** — skills can call other skills (e.g., `refactor` invokes `test-writer` to verify changes)
+- **Built-in skills** — `refactor`, `test-writer`, `documenter`, `security-audit`
 - **User-defined skills** — `.jam/skills/` directory with YAML/JSON skill definitions
-- **Skill marketplace** — share and import community skills via npm or a registry
+- **Composable** — skills can call other skills (e.g., `refactor` invokes `test-writer` to verify changes)
 
-```yaml
-# .jam/skills/api-endpoint.yaml
-name: api-endpoint
-description: Generate a new REST API endpoint with tests
-tools: [read_file, write_file, search_text, run_command]
-system: |
-  You are an API endpoint generator. Given a resource name and
-  fields, generate the route handler, validation, tests, and
-  OpenAPI schema following the project's existing patterns.
-output:
-  type: files
-  confirm: true
-```
+### Sub-Agents & Task Decomposition
 
-```bash
-jam skill run refactor --file src/api/auth.ts
-jam skill run test-writer --file src/utils/cache.ts
-jam skill list
-```
-
-### 🤖 Sub-Agents & Task Decomposition
-
-`jam run` now uses a **structured plan-then-execute** loop (typed `ExecutionPlan` with ordered steps, read-before-write enforcement, and a critic pass). The next evolution is true sub-agent decomposition — routing specialist child agents for independent sub-tasks.
+`jam run` uses a structured plan-then-execute loop. The next evolution is true sub-agent decomposition — routing specialist child agents for independent sub-tasks.
 
 - **Planner agent** — breaks a complex instruction into an ordered DAG of sub-tasks
-- **Specialist delegation** — each sub-task dispatched to a purpose-built sub-agent (e.g., "read and understand", "refactor", "write tests", "verify")
-- **Result aggregation** — parent agent collects sub-agent outputs and synthesizes a final result
-- **Parallel sub-agents** — independent sub-tasks execute concurrently (e.g., "write tests" and "update docs" in parallel)
-- **Scoped context** — each sub-agent receives only the context it needs, reducing token waste
+- **Parallel sub-agents** — independent sub-tasks execute concurrently
 - **Fail-and-retry isolation** — a failed sub-agent can be retried without restarting the entire task
 
-```bash
-jam run "Refactor the auth module to use JWT, update all tests, and document the changes"
-# Planner decomposes into:
-#   1. [understand] Read current auth module and tests
-#   2. [refactor]   Rewrite auth module with JWT
-#   3. [test]       Update tests for new implementation  (parallel with 4)
-#   4. [document]   Update docs and JSDoc comments        (parallel with 3)
-#   5. [verify]     Run tests and validate the patch
-```
-
-### 🔌 Connectors
-
-Connectors are adapters for external services — bringing data in and pushing results out. Currently Jam only understands the local filesystem and git.
-
-- **GitHub** — read/create issues, PRs, review comments; `jam review --pr 42` already shells out to `gh`, a connector would be native
-- **GitLab / Bitbucket** — equivalent PR/MR workflows for non-GitHub teams
-- **JIRA / Linear / Shortcut** — fetch issue context, update status, attach AI-generated summaries
-- **Slack / Discord** — post review summaries, commit digests, or search results to channels
-- **Database** — read schema, run read-only queries, explain query plans
-- **REST / GraphQL** — generic HTTP connector for internal APIs (`jam ask "Why is /api/users slow?" --connector api-prod`)
-- **Docker / K8s** — read container logs, describe pods, inspect images
-- **CI/CD** — read build logs, trigger pipelines, analyze failures
-
-```json
-// .jam/config.json
-{
-  "connectors": {
-    "github": { "token": "env:GITHUB_TOKEN" },
-    "jira": { "baseUrl": "https://myorg.atlassian.net", "token": "env:JIRA_TOKEN" },
-    "postgres": { "connectionString": "env:DATABASE_URL", "readOnly": true }
-  }
-}
-```
-
-### 🧠 MCP (Model Context Protocol) Support
+### MCP (Model Context Protocol) Support
 
 [MCP](https://modelcontextprotocol.io) is an open standard for connecting AI models to external tools and data sources. Adding MCP client support would let Jam consume any MCP-compatible server.
 
-- **MCP client** — Jam discovers and connects to MCP servers declared in config
-- **Tool bridge** — MCP tools appear as native Jam tools in the registry, usable by `jam run`
-- **Resource bridge** — MCP resources (files, database rows, API responses) injected as context
-- **Prompt bridge** — MCP prompt templates available as Jam skills
-- **Server mode** — expose Jam's own tools (read_file, search_text, git_diff, etc.) as an MCP server for other agents
+### Embeddings & Vector Search
 
-```json
-{
-  "mcp": {
-    "servers": {
-      "filesystem": { "command": "npx @modelcontextprotocol/server-filesystem /path/to/dir" },
-      "postgres":   { "command": "npx @modelcontextprotocol/server-postgres", "env": { "DATABASE_URL": "..." } }
-    }
-  }
-}
-```
+The current past-session search uses keyword overlap (Jaccard scoring). Optional local embeddings would enable true semantic search.
 
-### ⚡ Parallel Tool Execution
+- **Local embedding model** — use Ollama's embedding endpoint so nothing leaves your machine
+- **Semantic code search** — `jam search "authentication flow"` returns semantically relevant code
+- **RAG pipeline** — retrieve relevant code chunks before prompting
 
-Currently tools execute sequentially within each agent round. When the model requests multiple independent tool calls (e.g., read three files), they could run concurrently.
-
-- **Dependency analysis** — detect independent tool calls within a single round
-- **Concurrent dispatch** — `Promise.all()` for independent read operations
-- **Write serialization** — write tools always execute sequentially and with confirmation
-- **Progress display** — show parallel tool execution status in real time
-
-### 🔗 Middleware & Hooks
-
-A middleware chain around LLM calls and tool executions, enabling cross-cutting concerns without modifying core logic.
-
-- **Pre/post LLM hooks** — prompt injection defense, cost tracking, audit logging
-- **Pre/post tool hooks** — rate limiting, output sanitization, metrics
-- **Error interceptors** — custom retry logic, fallback providers, graceful degradation
-- **Event emitter** — structured events (`tool:start`, `tool:end`, `llm:stream`, `agent:iteration`) for UI decoupling, telemetry, and external integrations
-
-```typescript
-// .jam/middleware/cost-tracker.ts
-export default {
-  name: 'cost-tracker',
-  afterCompletion({ usage, provider, model }) {
-    const cost = estimateCost(provider, model, usage);
-    appendToLog(`~/.jam/cost.csv`, { timestamp: Date.now(), model, cost });
-  }
-};
-```
-
-### 🧭 Embeddings & Vector Search
-
-The current past-session search uses keyword overlap (Jaccard scoring), and the symbol index is regex-based. Optional local embeddings would enable true semantic search.
-
-- **Local embedding model** — use Ollama's embedding endpoint (`nomic-embed-text`, `mxbai-embed-large`) so nothing leaves your machine
-- **Codebase index** — vector index of functions, classes, and doc comments stored at `.jam/vectors/`
-- **Semantic code search** — `jam search "authentication flow"` returns semantically relevant code, not just keyword matches
-- **Session memory** — embed past Q&A pairs for cross-session context recall with relevance decay
-- **RAG pipeline** — retrieve relevant code chunks before prompting, reducing token usage and improving accuracy
-
-### 💰 Cost & Token Tracking
+### Cost & Token Tracking
 
 `TokenUsage` is already captured per request but not aggregated or displayed.
 
-- **Session cost estimation** — estimate cost based on provider pricing (configurable per-profile)
-- **Budget limits** — `maxCostPerSession`, `maxCostPerDay` in config; warn or hard-stop when exceeded
-- **Usage dashboard** — `jam usage` command showing tokens consumed, cost by model, by command, over time
-- **Token budget per tool call** — prevent runaway context from a single large file read
-
-```bash
-jam usage                # summary: today, this week, this month
-jam usage --detail       # per-session breakdown
-jam usage --export csv   # export for expense tracking
-```
-
-### 📦 Multi-File Transactions
-
-`apply_patch` and `write_file` currently operate on single files with no rollback mechanism.
-
-- **Transaction block** — group multiple file writes into an atomic operation
-- **Git stash checkpoint** — auto-stash before a multi-file edit, restore on failure
-- **Dry-run preview** — show all proposed changes across files before any writes
-- **Selective accept** — accept/reject individual file changes within a transaction
-
-### 🔍 Provider Capabilities & Feature Negotiation
-
-The `ProviderAdapter` interface treats all providers equally, but providers differ in capabilities.
-
-- **Capability flags** — `supportsToolCalling`, `supportsVision`, `supportsStructuredOutput`, `supportsEmbeddings` on `ProviderInfo`
-- **Graceful degradation** — if a provider doesn't support tool calling, fall back to prompt-based tool simulation
-- **Model capability discovery** — query the provider for model-specific features at runtime
-- **Auto-routing** — route tasks to the best-fit model/provider (e.g., use a fast model for planning, a capable model for generation)
-
-### 🧠 Persistent Agent Memory
-
-Working memory is currently session-scoped. Cross-session memory would make Jam smarter over time.
-
-- **Workspace knowledge base** — facts, patterns, and conventions learned from past sessions, stored per-repo
-- **Memory decay** — older memories lose relevance weight over time unless reinforced
-- **Explicit memory** — `jam remember "the auth module uses bcrypt, not argon2"` for user-declared facts
-- **Memory retrieval** — automatically surface relevant memories during planning and synthesis
-- **Forgetting** — `jam forget` to clear or selectively prune memories
-
-### 🌐 Web UI Companion
-
-A local web interface for sessions that benefit from richer display.
-
-- **Diff viewer** — syntax-highlighted side-by-side diffs for `jam patch` and `jam review`
-- **Session browser** — visual history of past chat sessions with search
-- **Tool call inspector** — expandable timeline of every tool call, its input, output, and duration
-- **Markdown preview** — rendered Markdown responses with code block copy buttons
-- **Served locally** — `jam ui` starts a local server; no external hosting
-
-### 🧪 Testing & Verification Skills
-
-First-class support for test generation and verification.
-
-- **Test generation** — `jam test generate src/utils/cache.ts` generates tests matching project conventions
-- **Test-driven patch** — `jam patch` can optionally run tests before and after applying changes
-- **Coverage-aware context** — prioritize uncovered code paths in review and audit workflows
-- **Regression detection** — track which tests fail after a patch and auto-revert if needed
-
-### 🐚 Shell Integration & Workflow Automation
-
-Deeper shell integration for power users and CI/CD pipelines.
-
-- **Git hooks** — `jam hooks install` sets up pre-commit (auto-lint), prepare-commit-msg (AI message), pre-push (review)
-- **Watch mode** — `jam watch` monitors file changes and provides continuous AI feedback
-- **Pipeline mode** — structured JSON I/O for chaining Jam commands in shell scripts and CI
-- **Makefile/Taskfile recipes** — pre-built task definitions for common workflows
+- **Session cost estimation** — estimate cost based on provider pricing
+- **Budget limits** — `maxCostPerSession`, `maxCostPerDay` in config
+- **Usage dashboard** — `jam usage` command showing tokens consumed over time
 
 ---
 
@@ -1016,8 +1059,8 @@ See [LICENSE](LICENSE) for the full license text.
 
 <div align="center">
 
-**Made with ❤️ by [Sunil Prakash](https://github.com/sunilp)**
+**Made with care by [Sunil Prakash](https://github.com/sunilp)**
 
-If you find Jam useful, consider giving it a ⭐ on GitHub — it helps others discover the project!
+If you find Jam useful, consider giving it a star on GitHub — it helps others discover the project!
 
 </div>

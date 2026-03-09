@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { rmSync } from 'node:fs';
 import { loadConfig, getActiveProfile } from './loader.js';
 import { CONFIG_DEFAULTS } from './defaults.js';
+import { inferProviderFromModel } from '../providers/factory.js';
 import type { JamConfig } from './schema.js';
 
 describe('loadConfig', () => {
@@ -81,6 +82,17 @@ describe('loadConfig', () => {
     writeFileSync(join(tmpDir, '.jamrc'), JSON.stringify({ toolPolicy: 'invalid_value' }));
     await expect(loadConfig(tmpDir)).rejects.toMatchObject({ code: 'CONFIG_INVALID' });
   });
+
+  it('auto-detects provider from model name when --provider is omitted', async () => {
+    const config = await loadConfig(tmpDir, { model: 'claude-sonnet-4-20250514' });
+    expect(config.profiles['default']?.provider).toBe('anthropic');
+    expect(config.profiles['default']?.model).toBe('claude-sonnet-4-20250514');
+  });
+
+  it('does not override explicit --provider even if model suggests different provider', async () => {
+    const config = await loadConfig(tmpDir, { model: 'claude-sonnet-4-20250514', provider: 'openai' });
+    expect(config.profiles['default']?.provider).toBe('openai');
+  });
 });
 
 describe('getActiveProfile', () => {
@@ -109,5 +121,37 @@ describe('getActiveProfile', () => {
       thrown = e;
     }
     expect(thrown).toMatchObject({ code: 'CONFIG_NOT_FOUND' });
+  });
+});
+
+describe('inferProviderFromModel', () => {
+  it('detects Anthropic from claude model names', () => {
+    expect(inferProviderFromModel('claude-sonnet-4-20250514')).toBe('anthropic');
+    expect(inferProviderFromModel('claude-opus-4-20250514')).toBe('anthropic');
+    expect(inferProviderFromModel('claude-haiku-3-20240307')).toBe('anthropic');
+  });
+
+  it('detects OpenAI from gpt model names', () => {
+    expect(inferProviderFromModel('gpt-4o')).toBe('openai');
+    expect(inferProviderFromModel('gpt-4o-mini')).toBe('openai');
+    expect(inferProviderFromModel('gpt-3.5-turbo')).toBe('openai');
+    expect(inferProviderFromModel('o1-preview')).toBe('openai');
+    expect(inferProviderFromModel('o3-mini')).toBe('openai');
+  });
+
+  it('detects Groq from size-suffixed model names', () => {
+    expect(inferProviderFromModel('llama3-8b-8192')).toBe('groq');
+    expect(inferProviderFromModel('mixtral-8x7b-32768')).toBe('groq');
+  });
+
+  it('detects embedded from smollm names', () => {
+    expect(inferProviderFromModel('smollm2-360m')).toBe('embedded');
+    expect(inferProviderFromModel('smollm2-1.7b')).toBe('embedded');
+  });
+
+  it('returns null for unknown models', () => {
+    expect(inferProviderFromModel('llama3.2')).toBeNull();
+    expect(inferProviderFromModel('mistral')).toBeNull();
+    expect(inferProviderFromModel('my-custom-model')).toBeNull();
   });
 });

@@ -23,7 +23,7 @@ export async function runConfigShow(options: CliOverrides = {}): Promise<void> {
     process.stdout.write(JSON.stringify(output, null, 2) + '\n');
   } catch (err) {
     const jamErr = JamError.fromUnknown(err);
-    await printError(jamErr.message);
+    await printError(jamErr.message, jamErr.hint);
     process.exit(1);
   }
 }
@@ -59,7 +59,7 @@ export async function runConfigInit(options: { global?: boolean } = {}): Promise
     await printSuccess(`Config initialized at: ${configPath}`);
   } catch (err) {
     const jamErr = JamError.fromUnknown(err);
-    await printError(jamErr.message);
+    await printError(jamErr.message, jamErr.hint);
     process.exit(1);
   }
 }

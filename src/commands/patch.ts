@@ -176,7 +176,7 @@ export async function runPatch(instruction: string | undefined, options: PatchOp
     }
   } catch (err) {
     const jamErr = JamError.fromUnknown(err);
-    await printError(jamErr.message);
+    await printError(jamErr.message, jamErr.hint);
     process.exit(1);
   }
 }

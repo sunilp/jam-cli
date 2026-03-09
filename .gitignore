@@ -8,3 +8,6 @@ coverage/
 .DS_Store
 *.tsbuildinfo
 .jam/
+.claude/
+improvements.md
+

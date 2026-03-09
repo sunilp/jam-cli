@@ -1,6 +1,6 @@
 import { loadConfig, getActiveProfile } from '../config/loader.js';
 import { createProvider } from '../providers/factory.js';
-import { printError, printSuccess, printWarning } from '../ui/renderer.js';
+import { printError, printSuccess } from '../ui/renderer.js';
 import { JamError } from '../utils/errors.js';
 import type { CliOverrides } from '../config/schema.js';
 
@@ -18,12 +18,7 @@ export async function runAuthLogin(options: CliOverrides = {}): Promise<void> {
     await printSuccess(`  Model: ${profile.model ?? 'default'}`);
   } catch (err) {
     const jamErr = JamError.fromUnknown(err);
-    await printError(jamErr.message);
-
-    if (jamErr.code === 'PROVIDER_UNAVAILABLE') {
-      await printWarning('Make sure Ollama is running: ollama serve');
-    }
-
+    await printError(jamErr.message, jamErr.hint);
     process.exit(1);
   }
 }
@@ -44,7 +39,7 @@ export async function runAuthLogout(options: CliOverrides = {}): Promise<void> {
     }
   } catch (err) {
     const jamErr = JamError.fromUnknown(err);
-    await printError(jamErr.message);
+    await printError(jamErr.message, jamErr.hint);
     process.exit(1);
   }
 }

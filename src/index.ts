@@ -38,6 +38,16 @@ function globalOpts() {
   }>();
 }
 
+// ── init ──────────────────────────────────────────────────────────────────────
+program
+  .command('init')
+  .description('Set up Jam in the current project (detect providers, create .jamrc and JAM.md)')
+  .option('-y, --yes', 'auto-select defaults without prompting')
+  .action(async (cmdOpts: Record<string, unknown>) => {
+    const { runInit } = await import('./commands/init.js');
+    await runInit({ yes: cmdOpts['yes'] === true });
+  });
+
 // ── ask ───────────────────────────────────────────────────────────────────────
 program
   .command('ask [prompt]')
@@ -331,6 +341,149 @@ context
   .action(async () => {
     const { runContextShow } = await import('./commands/context.js');
     await runContextShow();
+  });
+
+// ── trace ────────────────────────────────────────────────────────────────────
+program
+  .command('trace [symbol]')
+  .description('Trace the call graph of a function, class, or symbol across the codebase')
+  .option('--depth <n>', 'upstream chain depth (default: 3)', '3')
+  .option('--no-ai', 'skip AI analysis')
+  .option('--json', 'output call graph as JSON')
+  .action(async (symbol: string | undefined, cmdOpts: Record<string, unknown>) => {
+    const g = globalOpts();
+    const { runTrace } = await import('./commands/trace.js');
+    await runTrace(symbol, {
+      profile: g.profile,
+      provider: g.provider,
+      model: g.model,
+      baseUrl: g.baseUrl,
+      noColor: g.color === false,
+      quiet: g.quiet,
+      depth: cmdOpts['depth'] ? parseInt(String(cmdOpts['depth']), 10) : undefined,
+      noAi: cmdOpts['ai'] === false,
+      json: cmdOpts['json'] as boolean | undefined,
+    });
+  });
+
+// ── verify ───────────────────────────────────────────────────────────────────
+program
+  .command('verify')
+  .description('Validate changes — run checks, scan for secrets, assess risk')
+  .option('--staged', 'verify only staged changes')
+  .option('--base <ref>', 'diff against a base branch (e.g. main)')
+  .option('--json', 'output structured JSON report')
+  .option('--fail-on-risk <level>', 'exit 1 if risk >= level (low|medium|high|critical)')
+  .option('--no-ai', 'skip AI risk assessment')
+  .action(async (cmdOpts: Record<string, unknown>) => {
+    const g = globalOpts();
+    const { runVerify } = await import('./commands/verify.js');
+    await runVerify({
+      profile: g.profile,
+      provider: g.provider,
+      model: g.model,
+      baseUrl: g.baseUrl,
+      noColor: g.color === false,
+      quiet: g.quiet,
+      staged: cmdOpts['staged'] as boolean | undefined,
+      base: cmdOpts['base'] as string | undefined,
+      json: cmdOpts['json'] as boolean | undefined,
+      failOnRisk: cmdOpts['failOnRisk'] as 'low' | 'medium' | 'high' | 'critical' | undefined,
+      noAi: cmdOpts['ai'] === false,
+    });
+  });
+
+// ── jira ─────────────────────────────────────────────────────────────────
+const jira = program.command('jira').description('Jira integration — browse and start working on issues');
+
+jira
+  .command('issues')
+  .description('List Jira issues assigned to you')
+  .option('--status <status...>', 'filter by status (e.g. "In Progress" "To Do")')
+  .option('--json', 'output as JSON')
+  .action(async (cmdOpts: Record<string, unknown>) => {
+    const g = globalOpts();
+    const { runJiraIssues } = await import('./commands/jira.js');
+    await runJiraIssues({
+      profile: g.profile,
+      provider: g.provider,
+      model: g.model,
+      baseUrl: g.baseUrl,
+      noColor: g.color === false,
+      quiet: g.quiet,
+      status: cmdOpts['status'] as string[] | undefined,
+      json: cmdOpts['json'] as boolean | undefined,
+    });
+  });
+
+jira
+  .command('start [key]')
+  .description('Fetch issue details, create a branch, and generate an implementation plan')
+  .option('--no-branch', 'skip branch creation')
+  .action(async (key: string | undefined, cmdOpts: Record<string, unknown>) => {
+    const g = globalOpts();
+    const { runJiraStart } = await import('./commands/jira.js');
+    await runJiraStart(key, {
+      profile: g.profile,
+      provider: g.provider,
+      model: g.model,
+      baseUrl: g.baseUrl,
+      noColor: g.color === false,
+      quiet: g.quiet,
+      noBranch: cmdOpts['branch'] === false,
+    });
+  });
+
+jira
+  .command('view [key]')
+  .description('View full details of a Jira issue')
+  .option('--json', 'output as JSON')
+  .action(async (key: string | undefined, cmdOpts: Record<string, unknown>) => {
+    const g = globalOpts();
+    const { runJiraView } = await import('./commands/jira.js');
+    await runJiraView(key, {
+      profile: g.profile,
+      provider: g.provider,
+      model: g.model,
+      baseUrl: g.baseUrl,
+      noColor: g.color === false,
+      json: cmdOpts['json'] as boolean | undefined,
+    });
+  });
+
+// ── cache ─────────────────────────────────────────────────────────────────
+const cacheCmd = program.command('cache').description('Manage the response cache');
+
+cacheCmd
+  .command('stats')
+  .description('Show cache statistics')
+  .option('--json', 'output as JSON')
+  .action(async (cmdOpts: Record<string, unknown>) => {
+    const g = globalOpts();
+    const { runCacheStats } = await import('./commands/cache.js');
+    await runCacheStats({
+      profile: g.profile,
+      provider: g.provider,
+      json: cmdOpts['json'] as boolean | undefined,
+    });
+  });
+
+cacheCmd
+  .command('clear')
+  .description('Delete all cached responses')
+  .action(async () => {
+    const g = globalOpts();
+    const { runCacheClear } = await import('./commands/cache.js');
+    await runCacheClear({ profile: g.profile });
+  });
+
+cacheCmd
+  .command('prune')
+  .description('Remove expired cache entries')
+  .action(async () => {
+    const g = globalOpts();
+    const { runCachePrune } = await import('./commands/cache.js');
+    await runCachePrune({ profile: g.profile });
   });
 
 // ── doctor ────────────────────────────────────────────────────────────────────

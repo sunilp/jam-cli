@@ -14,4 +14,6 @@ export const CONFIG_DEFAULTS: JamConfig = {
   historyEnabled: true,
   logLevel: 'warn',
   redactPatterns: [],
+  cacheEnabled: true,
+  cacheTtlSeconds: 3600,
 };

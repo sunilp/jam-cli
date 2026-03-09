@@ -64,9 +64,12 @@ export function printJsonResult(result: {
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
 }
 
-export async function printError(message: string): Promise<void> {
+export async function printError(message: string, hint?: string): Promise<void> {
   const ck = await getChalk();
   process.stderr.write(ck.red(`Error: ${message}`) + '\n');
+  if (hint) {
+    process.stderr.write(ck.dim('\nHint: ' + hint) + '\n');
+  }
 }
 
 export async function printWarning(message: string): Promise<void> {

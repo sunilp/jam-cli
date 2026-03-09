@@ -82,7 +82,7 @@ export async function runExplain(filePaths: string[], options: ExplainOptions): 
     }
   } catch (err) {
     const jamErr = JamError.fromUnknown(err);
-    await printError(jamErr.message);
+    await printError(jamErr.message, jamErr.hint);
     process.exit(1);
   }
 }

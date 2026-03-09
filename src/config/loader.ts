@@ -138,11 +138,20 @@ export async function loadConfig(
   const profileName = cliOverrides.profile ?? config.defaultProfile;
   if (cliOverrides.provider || cliOverrides.model || cliOverrides.baseUrl) {
     const existingProfile = config.profiles[profileName] ?? { provider: 'ollama' };
+
+    // Auto-detect provider from model name when --model is set but --provider is not
+    let effectiveProvider = cliOverrides.provider;
+    if (!effectiveProvider && cliOverrides.model) {
+      const { inferProviderFromModel } = await import('../providers/factory.js');
+      const inferred = inferProviderFromModel(cliOverrides.model);
+      if (inferred) effectiveProvider = inferred;
+    }
+
     const providerChanged =
-      cliOverrides.provider !== undefined && cliOverrides.provider !== existingProfile.provider;
+      effectiveProvider !== undefined && effectiveProvider !== existingProfile.provider;
     const overriddenProfile: Profile = {
       ...existingProfile,
-      provider: cliOverrides.provider ?? existingProfile.provider,
+      provider: effectiveProvider ?? existingProfile.provider,
       // When switching providers without an explicit --base-url, clear the inherited
       // baseUrl so the new provider falls back to its own default endpoint.
       ...(providerChanged && !cliOverrides.baseUrl ? { baseUrl: undefined } : {}),

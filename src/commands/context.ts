@@ -37,7 +37,7 @@ export async function runContextInit(options: ContextInitOptions = {}): Promise<
     );
   } catch (err) {
     const jamErr = JamError.fromUnknown(err);
-    await printError(jamErr.message);
+    await printError(jamErr.message, jamErr.hint);
     process.exit(1);
   }
 }
@@ -65,7 +65,7 @@ export async function runContextShow(): Promise<void> {
     }
   } catch (err) {
     const jamErr = JamError.fromUnknown(err);
-    await printError(jamErr.message);
+    await printError(jamErr.message, jamErr.hint);
     process.exit(1);
   }
 }

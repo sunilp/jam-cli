@@ -6,6 +6,7 @@ import { withRetry, collectStream } from '../utils/stream.js';
 import { streamToStdout, printJsonResult, printError } from '../ui/renderer.js';
 import { JamError } from '../utils/errors.js';
 import { getWorkspaceRoot } from '../utils/workspace.js';
+import { ResponseCache, cachedCollect } from '../storage/response-cache.js';
 import type { CliOverrides } from '../config/schema.js';
 
 const execFileAsync = promisify(execFile);
@@ -74,16 +75,24 @@ export async function runDiff(options: DiffOptions): Promise<void> {
     };
 
     if (options.json) {
-      const { text, usage } = await collectStream(
-        withRetry(() => adapter.streamCompletion(request))
-      );
-      printJsonResult({ response: text, usage, model: profile.model });
+      if (config.cacheEnabled) {
+        const cache = new ResponseCache(config.cacheTtlSeconds * 1000);
+        const { text, usage } = await cachedCollect(cache, profile.provider, request, () =>
+          withRetry(() => adapter.streamCompletion(request))
+        );
+        printJsonResult({ response: text, usage, model: profile.model });
+      } else {
+        const { text, usage } = await collectStream(
+          withRetry(() => adapter.streamCompletion(request))
+        );
+        printJsonResult({ response: text, usage, model: profile.model });
+      }
     } else {
       await streamToStdout(withRetry(() => adapter.streamCompletion(request)));
     }
   } catch (err) {
     const jamErr = JamError.fromUnknown(err);
-    await printError(jamErr.message);
+    await printError(jamErr.message, jamErr.hint);
     process.exit(1);
   }
 }

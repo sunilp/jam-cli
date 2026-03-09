@@ -534,7 +534,7 @@ export async function runRun(instruction: string | undefined, options: RunOption
     stderrLog('\nTask complete.\n');
   } catch (err) {
     const jamErr = JamError.fromUnknown(err);
-    await printError(jamErr.message);
+    await printError(jamErr.message, jamErr.hint);
     process.exit(1);
   }
 }
