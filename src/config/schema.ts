@@ -37,6 +37,29 @@ export const CommitConventionSchema = z.object({
 }).optional();
 export type CommitConvention = z.infer<typeof CommitConventionSchema>;
 
+export const McpToolPolicySchema = z.enum(['auto', 'ask', 'deny']);
+export type McpToolPolicy = z.infer<typeof McpToolPolicySchema>;
+
+export const McpServerConfigSchema = z.object({
+  /** The command to start the MCP server (e.g. "npx", "node", "python"). */
+  command: z.string(),
+  /** Arguments to pass to the command. */
+  args: z.array(z.string()).optional(),
+  /** Extra environment variables to set for the server process. */
+  env: z.record(z.string()).optional(),
+  /** Whether this server is enabled (default: true). */
+  enabled: z.boolean().default(true),
+  /** Group tag for this server (e.g. 'code', 'jira', 'db', 'browser'). */
+  group: z.string().optional(),
+  /** Tool approval policy: 'auto' (follow global), 'ask' (confirm each), 'deny' (block all). */
+  toolPolicy: McpToolPolicySchema.default('auto'),
+  /** Only expose these tools from this server (allowlist). Empty = all. */
+  allowedTools: z.array(z.string()).optional(),
+  /** Hide these tools from this server (denylist). */
+  deniedTools: z.array(z.string()).optional(),
+});
+export type McpServerConfig = z.infer<typeof McpServerConfigSchema>;
+
 export const JiraConfigSchema = z.object({
   /** Jira base URL (e.g. https://jira.company.com or https://yourteam.atlassian.net) */
   baseUrl: z.string().url(),
@@ -63,6 +86,11 @@ export const JamConfigSchema = z.object({
   redactPatterns: z.array(z.string()).default([]),
   commitConvention: CommitConventionSchema,
   jira: JiraConfigSchema,
+  /** MCP server declarations — each key is a server name. */
+  mcpServers: z.record(McpServerConfigSchema).optional(),
+  /** Active MCP server groups. Only servers in these groups are connected.
+   *  If omitted, all enabled servers are connected regardless of group. */
+  mcpGroups: z.array(z.string()).optional(),
   /** Enable response caching to avoid redundant API calls (default: true). */
   cacheEnabled: z.boolean().default(true),
   /** Cache TTL in seconds (default: 3600 = 1 hour). */

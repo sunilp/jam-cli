@@ -3,6 +3,7 @@ import { createProvider } from '../providers/factory.js';
 import { createSession, getSession } from '../storage/history.js';
 import { getWorkspaceRoot } from '../utils/workspace.js';
 import { startChat } from '../ui/chat.js';
+import { createMcpManager } from '../mcp/manager.js';
 import { JamError } from '../utils/errors.js';
 import type { Message } from '../providers/base.js';
 
@@ -60,12 +61,20 @@ export async function runChat(options: ChatCommandOptions): Promise<void> {
       }
     }
 
-    await startChat({
-      provider: adapter,
-      config,
-      sessionId,
-      initialMessages,
-    });
+    const mcpLog = (msg: string) => process.stderr.write(msg + '\n');
+    const mcpManager = await createMcpManager(config.mcpServers, mcpLog, config.mcpGroups);
+
+    try {
+      await startChat({
+        provider: adapter,
+        config,
+        sessionId,
+        initialMessages,
+        mcpManager,
+      });
+    } finally {
+      await mcpManager.shutdown();
+    }
   } catch (err) {
     const jamErr = JamError.fromUnknown(err);
     process.stderr.write(`Error: ${jamErr.message}\n`);

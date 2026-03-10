@@ -6,6 +6,7 @@ import { printError, printWarning, renderMarkdown } from '../ui/renderer.js';
 import { JamError } from '../utils/errors.js';
 import { getWorkspaceRoot } from '../utils/workspace.js';
 import { ALL_TOOL_SCHEMAS, READONLY_TOOL_NAMES, executeTool } from '../tools/all-tools.js';
+import { createMcpManager } from '../mcp/manager.js';
 import {
   ToolCallTracker,
   loadProjectContext,
@@ -70,6 +71,9 @@ export async function runRun(instruction: string | undefined, options: RunOption
     const config = options.yes ? { ...rawConfig, toolPolicy: 'always' as const } : rawConfig;
     const profile = getActiveProfile(config);
     const adapter = await createProvider(profile);
+
+    // Connect to MCP servers (non-fatal if any fail)
+    const mcpManager = await createMcpManager(config.mcpServers, stderrLog, config.mcpGroups);
 
     stderrLog(`Starting task: ${instruction}\n`);
     stderrLog(`Provider: ${profile.provider}, Model: ${profile.model ?? 'default'}\n`);
@@ -141,6 +145,12 @@ export async function runRun(instruction: string | undefined, options: RunOption
     const originalLineCounts = new Map<string, number>();
     const stepVerifier = new StepVerifier();
 
+    // Merge MCP tool schemas with built-in tools
+    const mcpSchemas = mcpManager.getToolSchemas();
+    const allToolSchemas = mcpSchemas.length > 0
+      ? [...ALL_TOOL_SCHEMAS, ...mcpSchemas]
+      : ALL_TOOL_SCHEMAS;
+
     if (!adapter.chatWithTools) {
       await printError('Provider does not support tool calling. Use a provider/model that supports tools.');
       process.exit(1);
@@ -211,7 +221,7 @@ export async function runRun(instruction: string | undefined, options: RunOption
         messages = await memory.compact(messages);
       }
 
-      const response = await adapter.chatWithTools(messages, ALL_TOOL_SCHEMAS, {
+      const response = await adapter.chatWithTools(messages, allToolSchemas, {
         model: profile.model,
         temperature: profile.temperature,
         maxTokens: profile.maxTokens,
@@ -387,7 +397,28 @@ export async function runRun(instruction: string | undefined, options: RunOption
           continue;
         }
 
-        const isReadonly = READONLY_TOOL_NAMES.has(tc.name);
+        const isMcpTool = mcpManager.isOwnTool(tc.name);
+
+        // MCP tool policy enforcement
+        if (isMcpTool) {
+          const mcpPolicy = mcpManager.getToolPolicy(tc.name);
+          if (mcpPolicy === 'deny') {
+            stderrLog(formatToolCall(tc.name, tc.arguments, noColor) + ' (denied by MCP policy)\n');
+            messages.push({ role: 'user', content: `[Tool result: ${tc.name}]\nDenied: this MCP server has tool policy "deny".` });
+            tracker.record(tc.name, tc.arguments, true);
+            continue;
+          }
+          if (mcpPolicy === 'ask') {
+            const allowed = await confirmToolCall(tc.name, tc.arguments);
+            if (!allowed) {
+              messages.push({ role: 'user', content: `[Tool result: ${tc.name}]\nDenied by user.` });
+              tracker.record(tc.name, tc.arguments, true);
+              continue;
+            }
+          }
+        }
+
+        const isReadonly = !isMcpTool && READONLY_TOOL_NAMES.has(tc.name);
 
         // Check cache for read-only tools
         if (isReadonly) {
@@ -456,7 +487,11 @@ export async function runRun(instruction: string | undefined, options: RunOption
         let toolOutput: string;
         let wasError = false;
         try {
-          toolOutput = await executeTool(tc.name, tc.arguments, workspaceRoot);
+          if (isMcpTool) {
+            toolOutput = await mcpManager.executeTool(tc.name, tc.arguments);
+          } else {
+            toolOutput = await executeTool(tc.name, tc.arguments, workspaceRoot);
+          }
         } catch (err) {
           const jamErr = JamError.fromUnknown(err);
           toolOutput = `Tool error: ${jamErr.message}`;
@@ -531,6 +566,7 @@ export async function runRun(instruction: string | undefined, options: RunOption
       }
     }
 
+    await mcpManager.shutdown();
     stderrLog('\nTask complete.\n');
   } catch (err) {
     const jamErr = JamError.fromUnknown(err);

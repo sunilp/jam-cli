@@ -3,6 +3,7 @@ import { render, Box, Text, useApp, useInput, Static } from 'ink';
 import TextInput from 'ink-text-input';
 import type { ProviderAdapter, Message } from '../providers/base.js';
 import type { JamConfig } from '../config/schema.js';
+import type { McpManager } from '../mcp/manager.js';
 import { appendMessage } from '../storage/history.js';
 import { READ_ONLY_TOOL_SCHEMAS, executeReadOnlyTool } from '../tools/context-tools.js';
 import { getWorkspaceRoot } from '../utils/workspace.js';
@@ -28,6 +29,7 @@ export interface ChatOptions {
   config: JamConfig;
   sessionId: string;
   initialMessages: Message[];
+  mcpManager?: McpManager;
 }
 
 interface DisplayMessage {
@@ -41,6 +43,7 @@ interface ChatAppProps {
   config: JamConfig;
   sessionId: string;
   initialMessages: Message[];
+  mcpManager?: McpManager;
 }
 
 function formatRole(role: string): string {
@@ -75,6 +78,7 @@ function ChatApp({
   config,
   sessionId,
   initialMessages,
+  mcpManager,
 }: ChatAppProps): React.ReactElement {
   const { exit } = useApp();
 
@@ -189,6 +193,12 @@ function ChatApp({
           const memory = new WorkingMemory(provider, profile?.model, undefined);
           const cache = new ToolResultCache();
 
+          // Merge MCP tool schemas with read-only tools
+          const mcpSchemas = mcpManager?.getToolSchemas() ?? [];
+          const chatToolSchemas = mcpSchemas.length > 0
+            ? [...READ_ONLY_TOOL_SCHEMAS, ...mcpSchemas]
+            : READ_ONLY_TOOL_SCHEMAS;
+
           agentSystemPrompt =
             profile?.systemPrompt ??
             buildSystemPrompt(jamContext, workspaceCtx);
@@ -243,7 +253,7 @@ function ChatApp({
               toolMessages = await memory.compact(toolMessages);
             }
 
-            const response = await provider.chatWithTools(toolMessages, READ_ONLY_TOOL_SCHEMAS, {
+            const response = await provider.chatWithTools(toolMessages, chatToolSchemas, {
               model: profile?.model,
               temperature: profile?.temperature,
               maxTokens: profile?.maxTokens,
@@ -325,11 +335,26 @@ function ChatApp({
                 continue;
               }
 
+              // MCP tool policy enforcement
+              if (mcpManager?.isOwnTool(tc.name)) {
+                const mcpPolicy = mcpManager.getToolPolicy(tc.name);
+                if (mcpPolicy === 'deny') {
+                  setStreamingText(ansi(ANSI.dimGray, `✕ ${tc.name} (denied by MCP policy)`));
+                  toolMessages.push({ role: 'user', content: `[Tool result: ${tc.name}]\nDenied: this MCP server has tool policy "deny".` });
+                  tracker.record(tc.name, tc.arguments, true);
+                  continue;
+                }
+              }
+
               setStreamingText(ansi(ANSI.dimCyan, `▸ ${tc.name}(${Object.entries(tc.arguments).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ')})`));
               let toolOutput: string;
               let wasError = false;
               try {
-                toolOutput = await executeReadOnlyTool(tc.name, tc.arguments, workspaceRoot);
+                if (mcpManager?.isOwnTool(tc.name)) {
+                  toolOutput = await mcpManager.executeTool(tc.name, tc.arguments);
+                } else {
+                  toolOutput = await executeReadOnlyTool(tc.name, tc.arguments, workspaceRoot);
+                }
               } catch (err) {
                 toolOutput = `Tool error: ${err instanceof Error ? err.message : String(err)}`;
                 wasError = true;
@@ -428,7 +453,7 @@ function ChatApp({
         setCommittedMessages((prev) => [...prev, assistantDisplay]);
       }
     },
-    [inputDisabled, sessionId, config, provider]
+    [inputDisabled, sessionId, config, provider, mcpManager]
   );
 
   // Spinner frames for "Thinking..."
@@ -499,6 +524,7 @@ export async function startChat(options: ChatOptions): Promise<void> {
       config={options.config}
       sessionId={options.sessionId}
       initialMessages={options.initialMessages}
+      mcpManager={options.mcpManager}
     />
   );
 

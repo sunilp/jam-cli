@@ -26,13 +26,23 @@
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 [![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-yellow.svg)](https://conventionalcommits.org)
 
-Ask questions · Trace call graphs · Review diffs · Generate patches · Run agentic tasks · Connect to Jira
+Ask questions · Trace call graphs · Review diffs · Generate patches · Run agentic tasks · Connect to MCP servers · 12 built-in dev utilities
 
 *All from your command line, powered by Ollama, OpenAI, Anthropic, Groq, or any compatible provider.*
 
-[Getting Started](#quick-start) · [Commands](#commands) · [Configuration](#configuration) · [Contributing](#contributing) · [Security](#security-policy)
+[Getting Started](#quick-start) · [Commands](#commands) · [Utilities](#developer-utilities-zero-llm) · [MCP](#jam-mcp) · [Configuration](#configuration) · [Contributing](#contributing)
 
 </div>
+
+---
+
+> ### What's New in v0.5.0
+>
+> **MCP (Model Context Protocol) support** — Connect to any MCP-compatible tool server over stdio. Per-server enable/disable, group-based activation, tool approval policies (auto/ask/deny), and fine-grained allowlist/denylist filtering. [Full docs](docs/mcp.md)
+>
+> **12 zero-LLM developer utilities** — A swiss army knife built into your CLI. No AI provider needed. `jam todo`, `jam ports`, `jam recent`, `jam stats`, `jam hash`, `jam env`, `jam deps`, `jam dup`, `jam json`, `jam convert`, `jam pack`, `jam http`. [Full docs](docs/utilities.md)
+>
+> **MCP governance** — Group servers by profile (code, jira, db, browser), activate groups via `mcpGroups`, control tool exposure per server with `allowedTools`/`deniedTools`.
 
 ---
 
@@ -71,6 +81,8 @@ Most AI coding tools are built around a single vendor's model, require a browser
 | 🔐 | **Secure secrets** | OS keychain via keytar, env var fallback |
 | 🐚 | **Shell completions** | Bash and Zsh |
 | 🏠 | **Privacy-first** | Runs locally — your code never leaves your machine |
+| 🔗 | **MCP support** | Connect to any Model Context Protocol server — with governance, groups, and per-server policies |
+| 🧰 | **12 dev utilities** | `todo`, `ports`, `stats`, `deps`, `dup`, `env`, `hash`, `json`, `convert`, `http`, `pack`, `recent` — zero LLM required |
 
 ---
 
@@ -652,6 +664,198 @@ Checks:
 
 ---
 
+### `jam mcp`
+
+Connect to [MCP (Model Context Protocol)](https://modelcontextprotocol.io) servers and use their tools in `jam ask`, `jam chat`, and `jam run`. Supports per-server governance: enable/disable, groups, tool policies, and allowlists. [Full documentation](docs/mcp.md)
+
+```bash
+jam mcp list                # show connected servers, tools, groups, policies
+jam mcp list --json         # structured JSON output
+```
+
+**Configuration** (in `.jamrc`):
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+      "group": "code",
+      "toolPolicy": "auto"
+    },
+    "postgres": {
+      "command": "node",
+      "args": ["pg-mcp-server.js"],
+      "group": "db",
+      "toolPolicy": "ask",
+      "allowedTools": ["read_query", "list_tables"]
+    }
+  },
+  "mcpGroups": ["code", "db"]
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | boolean | `true` | Enable/disable this server |
+| `group` | string | — | Group tag (e.g. `code`, `jira`, `db`, `browser`) |
+| `toolPolicy` | `auto` \| `ask` \| `deny` | `auto` | Tool approval policy for this server |
+| `allowedTools` | string[] | — | Only expose these tools (allowlist) |
+| `deniedTools` | string[] | — | Hide these tools (denylist) |
+
+---
+
+## Developer Utilities (Zero-LLM)
+
+12 built-in commands that work **without any AI provider**. No API keys, no network calls. Pure algorithmic tools for everyday development. [Full documentation](docs/utilities.md)
+
+### `jam todo`
+
+Scan for TODO/FIXME/HACK/XXX/NOTE/BUG comments with git blame enrichment. [Docs](docs/todo.md)
+
+```bash
+jam todo                     # scan and group by type
+jam todo --by-author         # group by git author
+jam todo --by-age            # sort oldest first
+jam todo --type FIXME BUG    # filter specific types
+jam todo --json              # machine-readable output
+```
+
+### `jam ports`
+
+Show listening ports, identify processes, kill by port. [Docs](docs/ports.md)
+
+```bash
+jam ports                    # list all listening ports
+jam ports --kill 3000        # kill process on port 3000
+jam ports --filter node      # filter by process name
+jam ports --json
+```
+
+### `jam recent`
+
+Recently modified files grouped by time period. [Docs](docs/recent.md)
+
+```bash
+jam recent                   # last 7 days, grouped by today/week/earlier
+jam recent --days 30         # last 30 days
+jam recent --author "Alice"  # filter by git author
+jam recent --json
+```
+
+### `jam stats`
+
+Instant codebase health dashboard — LOC, churn, complexity. [Docs](docs/stats.md)
+
+```bash
+jam stats                    # full dashboard
+jam stats --sort lines       # sort languages by total lines
+jam stats --json             # structured output
+```
+
+### `jam hash`
+
+Smart file/directory hashing with .gitignore awareness. [Docs](docs/hash.md)
+
+```bash
+jam hash src/                # SHA256 of entire directory
+jam hash package.json        # single file hash
+jam hash --dirty             # hash only modified files
+jam hash --check sums.txt    # verify checksums
+jam hash --algo md5 --short  # short MD5 hashes
+```
+
+### `jam env`
+
+.env file manager — diff, validate, redact. [Docs](docs/env.md)
+
+```bash
+jam env                      # list all .env files
+jam env --diff               # compare .env vs .env.example
+jam env --missing            # find empty variables
+jam env --redact             # mask secrets for sharing
+jam env --validate           # check format issues
+```
+
+### `jam deps`
+
+Import graph analyzer — cycles, orphans, hotspots. [Docs](docs/deps.md)
+
+```bash
+jam deps                     # full analysis
+jam deps --circular          # circular dependencies only
+jam deps --orphans           # files imported by nothing
+jam deps --hotspots          # most-imported files
+jam deps --src src/          # limit to directory
+jam deps --json
+```
+
+### `jam dup`
+
+Near-duplicate code detection using token similarity. [Docs](docs/dup.md)
+
+```bash
+jam dup                      # scan for duplicates (>80% similar, >6 lines)
+jam dup --threshold 0.9      # stricter matching
+jam dup --min-lines 10       # larger blocks only
+jam dup --glob "*.ts"        # limit to TypeScript
+jam dup --json
+```
+
+### `jam json`
+
+JSON swiss knife — pretty print, query, diff, flatten. [Docs](docs/json.md)
+
+```bash
+jam json data.json                          # pretty print with colors
+jam json data.json --query "users[0].name"  # dot-path query
+jam json a.json --diff b.json               # deep diff
+jam json data.json --flatten                # nested → dot paths
+cat data.json | jam json --minify           # minify from stdin
+jam json data.json --sort-keys              # sort keys recursively
+```
+
+### `jam convert`
+
+Format converter — JSON, YAML, CSV, Base64, URL encode, Hex. [Docs](docs/convert.md)
+
+```bash
+jam convert data.json --to yaml             # JSON → YAML
+jam convert config.yaml --to json           # YAML → JSON
+jam convert data.csv --to json              # CSV → JSON
+echo "hello" | jam convert --to base64      # encode
+echo "aGVsbG8=" | jam convert --from base64 # decode
+echo "hello" | jam convert --to hex         # hex encode
+```
+
+### `jam pack`
+
+Package.json analyzer — sizes, unused deps, scripts. [Docs](docs/pack.md)
+
+```bash
+jam pack                     # full summary
+jam pack --size              # dependency size ranking
+jam pack --unused            # detect unused dependencies
+jam pack --scripts           # list npm scripts
+jam pack --json
+```
+
+### `jam http`
+
+HTTP client with auto JSON formatting and timing. [Docs](docs/http.md)
+
+```bash
+jam http https://api.example.com/users              # GET (method optional)
+jam http POST https://api.example.com/users \
+  --body '{"name":"Alice"}'                         # POST with JSON body
+jam http GET https://api.example.com \
+  --bearer mytoken --verbose --timing               # auth + headers + timing
+jam http GET https://api.example.com --output out.json  # save to file
+```
+
+---
+
 ## Configuration
 
 ### Config File Locations
@@ -713,7 +917,16 @@ Jam merges config in priority order (highest wins):
     "email": "you@company.com",
     "branchTemplate": "{type}/{key}-{summary}",
     "defaultJql": "project = MYPROJ"
-  }
+  },
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+      "group": "code",
+      "toolPolicy": "auto"
+    }
+  },
+  "mcpGroups": ["code"]
 }
 ```
 
@@ -861,7 +1074,7 @@ npm run dev -- ask "What is 2+2?"   # run from source with tsx
 npm run build                         # compile TypeScript to dist/
 npm run typecheck                     # tsc --noEmit
 npm run lint                          # ESLint
-npm test                              # Vitest unit tests (289 tests)
+npm test                              # Vitest unit tests (311 tests)
 npm run test:watch                    # watch mode
 npm run test:coverage                 # coverage report
 ```
@@ -871,9 +1084,10 @@ npm run test:coverage                 # coverage report
 ```
 src/
 ├── index.ts           # CLI entry point — command registration (Commander)
-├── commands/          # One file per command (ask, chat, run, trace, verify, jira, …)
+├── commands/          # One file per command (ask, chat, run, trace, verify, jira, mcp, todo, ports, …)
 ├── providers/         # LLM adapters — Ollama, OpenAI, Anthropic, Groq, Embedded
 ├── integrations/      # External service clients (Jira)
+├── mcp/               # MCP client, transport, manager, types
 ├── tools/             # Model-callable tools + registry + permission enforcement
 ├── config/            # Zod schema, cosmiconfig loader, built-in defaults
 ├── storage/           # Chat sessions + response cache (file-based)
@@ -939,7 +1153,7 @@ Look for issues labeled [`good first issue`](https://github.com/sunilp/jam-cli/l
 ### What the Codebase Looks Like
 
 - **Strict TypeScript throughout** — no `any`, no guessing what a function does
-- **Tests colocated with source** — `foo.ts` → `foo.test.ts`, using Vitest (289 tests across 23 files)
+- **Tests colocated with source** — `foo.ts` → `foo.test.ts`, using Vitest (311 tests across 24 files)
 - **One file per concern** — each command, provider, and tool is self-contained
 - **Zod schema validation** — config is validated at load time, not at runtime when it's too late
 - **Conventional Commits** — the git log tells the story of the project
@@ -977,7 +1191,8 @@ We take security seriously. If you discover a vulnerability, please **do not** o
 - [x] Call graph tracing (`jam trace`)
 - [x] Response caching (`jam cache`)
 - [x] Actionable error messages with hints
-- [ ] MCP (Model Context Protocol) support
+- [x] MCP (Model Context Protocol) support with governance
+- [x] 12 zero-LLM developer utilities
 - [ ] Plugin system for custom tools
 - [ ] Token usage tracking and budgets
 - [ ] Embeddings & vector search
@@ -1013,10 +1228,6 @@ Skills are named, composable mini-agents — each with a focused system prompt, 
 - **Planner agent** — breaks a complex instruction into an ordered DAG of sub-tasks
 - **Parallel sub-agents** — independent sub-tasks execute concurrently
 - **Fail-and-retry isolation** — a failed sub-agent can be retried without restarting the entire task
-
-### MCP (Model Context Protocol) Support
-
-[MCP](https://modelcontextprotocol.io) is an open standard for connecting AI models to external tools and data sources. Adding MCP client support would let Jam consume any MCP-compatible server.
 
 ### Embeddings & Vector Search
 

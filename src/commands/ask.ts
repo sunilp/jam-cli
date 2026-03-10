@@ -6,6 +6,7 @@ import { streamToStdout, printJsonResult, printError, renderMarkdown } from '../
 import { JamError } from '../utils/errors.js';
 import { getWorkspaceRoot } from '../utils/workspace.js';
 import { READ_ONLY_TOOL_SCHEMAS, executeReadOnlyTool } from '../tools/context-tools.js';
+import { createMcpManager } from '../mcp/manager.js';
 import {
   ToolCallTracker,
   loadProjectContext,
@@ -161,6 +162,12 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
 
     if (useTools && adapter.chatWithTools) {
       const noColor = options.noColor ?? false;
+      const mcpManager = await createMcpManager(config.mcpServers, stderrLog, config.mcpGroups);
+      const mcpSchemas = mcpManager.getToolSchemas();
+      const askToolSchemas = mcpSchemas.length > 0
+        ? [...READ_ONLY_TOOL_SCHEMAS, ...mcpSchemas]
+        : READ_ONLY_TOOL_SCHEMAS;
+
       const tracker = new ToolCallTracker();
       const memory = new WorkingMemory(adapter, profile.model, systemPrompt);
       const cache = new ToolResultCache();
@@ -267,7 +274,7 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
           messages = await memory.compact(messages);
         }
 
-        const response = await adapter.chatWithTools(messages, READ_ONLY_TOOL_SCHEMAS, {
+        const response = await adapter.chatWithTools(messages, askToolSchemas, {
           model: profile.model,
           temperature: profile.temperature,
           maxTokens: profile.maxTokens,
@@ -289,9 +296,9 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
               if (verdict.pass) {
                 stderrLog(formatSeparator('Answer', noColor));
                 await renderFinalAnswer(finalText, response.usage, options, profile, noColor, stderrLog);
-                // Auto-update JAM.md with usage patterns
                 const log = memory.getAccessLog();
                 updateContextWithUsage(workspaceRoot, log.readFiles, log.searchQueries).catch(() => {});
+                await mcpManager.shutdown();
                 return;
               }
               // Critic rejected — re-enter loop at the last incomplete plan step
@@ -327,9 +334,9 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
 
           stderrLog(formatSeparator('Answer', noColor));
           await renderFinalAnswer(finalText, response.usage, options, profile, noColor, stderrLog);
-          // Auto-update JAM.md with usage patterns
           const log = memory.getAccessLog();
           updateContextWithUsage(workspaceRoot, log.readFiles, log.searchQueries).catch(() => {});
+          await mcpManager.shutdown();
           return;
         }
 
@@ -366,12 +373,28 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
             continue;
           }
 
+          // MCP tool policy enforcement
+          if (mcpManager.isOwnTool(tc.name)) {
+            const mcpPolicy = mcpManager.getToolPolicy(tc.name);
+            if (mcpPolicy === 'deny') {
+              stderrLog(formatToolCall(tc.name, tc.arguments, noColor) + ' (denied by MCP policy)\n');
+              messages.push({ role: 'user', content: `[Tool result: ${tc.name}]\nDenied: this MCP server has tool policy "deny".` });
+              tracker.record(tc.name, tc.arguments, true);
+              continue;
+            }
+            // 'ask' policy in ask mode is treated as 'auto' (read-only context gathering)
+          }
+
           stderrLog(formatToolCall(tc.name, tc.arguments, noColor) + '\n');
 
           let toolOutput: string;
           let wasError = false;
           try {
-            toolOutput = await executeReadOnlyTool(tc.name, tc.arguments, workspaceRoot);
+            if (mcpManager.isOwnTool(tc.name)) {
+              toolOutput = await mcpManager.executeTool(tc.name, tc.arguments);
+            } else {
+              toolOutput = await executeReadOnlyTool(tc.name, tc.arguments, workspaceRoot);
+            }
           } catch (err) {
             toolOutput = `Tool error: ${JamError.fromUnknown(err).message}`;
             wasError = true;
@@ -404,6 +427,7 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
       }
 
       // Exceeded round limit — fall through to streaming
+      await mcpManager.shutdown();
       stderrLog(formatSeparator('Max tool rounds reached, generating answer', noColor));
     }
 

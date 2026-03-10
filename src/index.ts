@@ -451,6 +451,23 @@ jira
     });
   });
 
+// ── mcp ──────────────────────────────────────────────────────────────────
+const mcp = program.command('mcp').description('Manage MCP (Model Context Protocol) servers');
+
+mcp
+  .command('list')
+  .description('Connect to configured MCP servers and list their tools')
+  .option('--json', 'output as JSON')
+  .action(async (cmdOpts: Record<string, unknown>) => {
+    const g = globalOpts();
+    const { runMcpList } = await import('./commands/mcp.js');
+    await runMcpList({
+      profile: g.profile,
+      provider: g.provider,
+      json: cmdOpts['json'] as boolean | undefined,
+    });
+  });
+
 // ── cache ─────────────────────────────────────────────────────────────────
 const cacheCmd = program.command('cache').description('Manage the response cache');
 
@@ -484,6 +501,238 @@ cacheCmd
     const g = globalOpts();
     const { runCachePrune } = await import('./commands/cache.js');
     await runCachePrune({ profile: g.profile });
+  });
+
+// ── todo ─────────────────────────────────────────────────────────────────
+program
+  .command('todo')
+  .description('Scan codebase for TODO/FIXME/HACK/XXX comments')
+  .option('--by-author', 'group by git author')
+  .option('--by-age', 'sort by age (oldest first)')
+  .option('--type <types...>', 'filter by type (e.g. TODO FIXME)')
+  .option('--pattern <regex>', 'custom pattern to match')
+  .option('--json', 'output as JSON')
+  .action(async (cmdOpts: Record<string, unknown>) => {
+    const { runTodo } = await import('./commands/todo.js');
+    await runTodo({
+      byAuthor: cmdOpts['byAuthor'] as boolean | undefined,
+      byAge: cmdOpts['byAge'] as boolean | undefined,
+      type: cmdOpts['type'] as string[] | undefined,
+      pattern: cmdOpts['pattern'] as string | undefined,
+      json: cmdOpts['json'] as boolean | undefined,
+    });
+  });
+
+// ── ports ────────────────────────────────────────────────────────────────
+program
+  .command('ports')
+  .description('Show what is listening on your dev ports')
+  .option('--kill <port>', 'kill process on a specific port')
+  .option('--filter <term>', 'filter by port number, process, or command')
+  .option('--json', 'output as JSON')
+  .action(async (cmdOpts: Record<string, unknown>) => {
+    const { runPorts } = await import('./commands/ports.js');
+    runPorts({
+      kill: cmdOpts['kill'] as string | undefined,
+      filter: cmdOpts['filter'] as string | undefined,
+      json: cmdOpts['json'] as boolean | undefined,
+    });
+  });
+
+// ── recent ───────────────────────────────────────────────────────────────
+program
+  .command('recent')
+  .description('Show recently modified files by git activity')
+  .option('--days <n>', 'lookback period in days (default: 7)')
+  .option('--author <name>', 'filter by git author')
+  .option('--limit <n>', 'max files to show (default: 30)')
+  .option('--json', 'output as JSON')
+  .action(async (cmdOpts: Record<string, unknown>) => {
+    const { runRecent } = await import('./commands/recent.js');
+    await runRecent({
+      days: cmdOpts['days'] ? parseInt(String(cmdOpts['days']), 10) : undefined,
+      author: cmdOpts['author'] as string | undefined,
+      limit: cmdOpts['limit'] ? parseInt(String(cmdOpts['limit']), 10) : undefined,
+      json: cmdOpts['json'] as boolean | undefined,
+    });
+  });
+
+// ── stats ────────────────────────────────────────────────────────────────
+program
+  .command('stats')
+  .description('Codebase health dashboard — LOC, churn, complexity')
+  .option('--sort <field>', 'sort languages by: code, files, lines (default: code)')
+  .option('--json', 'output as JSON')
+  .action(async (cmdOpts: Record<string, unknown>) => {
+    const { runStats } = await import('./commands/stats.js');
+    await runStats({
+      sort: cmdOpts['sort'] as string | undefined,
+      json: cmdOpts['json'] as boolean | undefined,
+    });
+  });
+
+// ── hash ─────────────────────────────────────────────────────────────────
+program
+  .command('hash [paths...]')
+  .description('Hash files or directories (.gitignore-aware)')
+  .option('--algo <algorithm>', 'hash algorithm: sha256, sha1, md5 (default: sha256)')
+  .option('--dirty', 'show modified files and their hashes')
+  .option('--short', 'show short (12-char) hashes')
+  .option('--check <file>', 'verify hashes from a checksum file')
+  .option('--json', 'output as JSON')
+  .action(async (paths: string[], cmdOpts: Record<string, unknown>) => {
+    const { runHash } = await import('./commands/hash.js');
+    await runHash(paths, {
+      algo: cmdOpts['algo'] as string | undefined,
+      dirty: cmdOpts['dirty'] as boolean | undefined,
+      short: cmdOpts['short'] as boolean | undefined,
+      check: cmdOpts['check'] as string | undefined,
+      json: cmdOpts['json'] as boolean | undefined,
+    });
+  });
+
+// ── env ──────────────────────────────────────────────────────────────────
+program
+  .command('env')
+  .description('Manage .env files — diff, validate, find missing vars, redact')
+  .option('--diff', 'compare .env against .env.example')
+  .option('--missing', 'show variables with empty values')
+  .option('--redact', 'print .env with secrets redacted')
+  .option('--validate', 'check for formatting issues')
+  .option('--file <path>', 'env file to inspect (default: .env)')
+  .option('--example <path>', 'example file for diffing')
+  .option('--json', 'output as JSON')
+  .action(async (cmdOpts: Record<string, unknown>) => {
+    const { runEnv } = await import('./commands/env.js');
+    await runEnv({
+      diff: cmdOpts['diff'] as boolean | undefined,
+      missing: cmdOpts['missing'] as boolean | undefined,
+      redact: cmdOpts['redact'] as boolean | undefined,
+      validate: cmdOpts['validate'] as boolean | undefined,
+      file: cmdOpts['file'] as string | undefined,
+      example: cmdOpts['example'] as string | undefined,
+      json: cmdOpts['json'] as boolean | undefined,
+    });
+  });
+
+// ── deps ─────────────────────────────────────────────────────────────────
+program
+  .command('deps')
+  .description('Analyze import dependency graph — cycles, orphans, hotspots')
+  .option('--circular', 'show only circular dependencies')
+  .option('--orphans', 'show only orphan files (imported by nothing)')
+  .option('--hotspots', 'show only import hotspots')
+  .option('--src <dir>', 'limit to a source directory (e.g. src)')
+  .option('--json', 'output as JSON')
+  .action(async (cmdOpts: Record<string, unknown>) => {
+    const { runDeps } = await import('./commands/deps.js');
+    await runDeps({
+      circular: cmdOpts['circular'] as boolean | undefined,
+      orphans: cmdOpts['orphans'] as boolean | undefined,
+      hotspots: cmdOpts['hotspots'] as boolean | undefined,
+      src: cmdOpts['src'] as string | undefined,
+      json: cmdOpts['json'] as boolean | undefined,
+    });
+  });
+
+// ── dup ──────────────────────────────────────────────────────────────────
+program
+  .command('dup')
+  .description('Detect near-duplicate code blocks')
+  .option('--min-lines <n>', 'minimum block size in lines (default: 6)')
+  .option('--threshold <n>', 'similarity threshold 0-1 (default: 0.8)')
+  .option('--glob <pattern>', 'limit to files matching glob')
+  .option('--limit <n>', 'max duplicates to report (default: 20)')
+  .option('--json', 'output as JSON')
+  .action(async (cmdOpts: Record<string, unknown>) => {
+    const { runDup } = await import('./commands/dup.js');
+    await runDup({
+      minLines: cmdOpts['minLines'] ? parseInt(String(cmdOpts['minLines']), 10) : undefined,
+      threshold: cmdOpts['threshold'] ? parseFloat(String(cmdOpts['threshold'])) : undefined,
+      glob: cmdOpts['glob'] as string | undefined,
+      limit: cmdOpts['limit'] ? parseInt(String(cmdOpts['limit']), 10) : undefined,
+      json: cmdOpts['json'] as boolean | undefined,
+    });
+  });
+
+// ── json ─────────────────────────────────────────────────────────────────
+program
+  .command('json [file]')
+  .description('JSON swiss knife — pretty print, query, diff, minify')
+  .option('--query <path>', 'extract value by dot-path (e.g. "users[0].name")')
+  .option('--diff <file>', 'diff against another JSON file')
+  .option('--minify', 'output minified JSON')
+  .option('--sort-keys', 'sort object keys alphabetically')
+  .option('--flatten', 'flatten nested objects to dot-path keys')
+  .option('--no-color', 'disable colored output')
+  .action(async (file: string | undefined, cmdOpts: Record<string, unknown>) => {
+    const { runJson } = await import('./commands/json.js');
+    await runJson(file, {
+      query: cmdOpts['query'] as string | undefined,
+      diff: cmdOpts['diff'] as string | undefined,
+      minify: cmdOpts['minify'] as boolean | undefined,
+      sortKeys: cmdOpts['sortKeys'] as boolean | undefined,
+      flatten: cmdOpts['flatten'] as boolean | undefined,
+      color: cmdOpts['color'] as boolean | undefined,
+    });
+  });
+
+// ── convert ──────────────────────────────────────────────────────────────
+program
+  .command('convert [file]')
+  .description('Convert between formats — JSON, YAML, CSV, Base64, URL, Hex')
+  .option('--from <format>', 'input format (auto-detected if omitted)')
+  .option('--to <format>', 'output format (json, yaml, csv, base64, url, hex)')
+  .action(async (file: string | undefined, cmdOpts: Record<string, unknown>) => {
+    const { runConvert } = await import('./commands/convert.js');
+    await runConvert(file, {
+      from: cmdOpts['from'] as string | undefined,
+      to: cmdOpts['to'] as string | undefined,
+    });
+  });
+
+// ── pack ─────────────────────────────────────────────────────────────────
+program
+  .command('pack')
+  .description('Package analyzer — deps, size, unused detection, scripts')
+  .option('--unused', 'show potentially unused dependencies')
+  .option('--size', 'show dependency size breakdown')
+  .option('--scripts', 'list available npm scripts')
+  .option('--json', 'output as JSON')
+  .action(async (cmdOpts: Record<string, unknown>) => {
+    const { runPack } = await import('./commands/pack.js');
+    await runPack({
+      unused: cmdOpts['unused'] as boolean | undefined,
+      size: cmdOpts['size'] as boolean | undefined,
+      scripts: cmdOpts['scripts'] as boolean | undefined,
+      json: cmdOpts['json'] as boolean | undefined,
+    });
+  });
+
+// ── http ─────────────────────────────────────────────────────────────────
+program
+  .command('http [method] [url]')
+  .description('Quick HTTP client with pretty JSON output')
+  .option('-H, --header <header...>', 'request headers (e.g. "Content-Type: application/json")')
+  .option('-d, --body <body>', 'request body (prefix with @ to read from file)')
+  .option('--bearer <token>', 'set Authorization: Bearer header')
+  .option('--json', 'force JSON output formatting')
+  .option('--timing', 'show request timing details')
+  .option('-v, --verbose', 'show response headers')
+  .option('-o, --output <file>', 'save response body to file')
+  .option('--no-color', 'disable colored output')
+  .action(async (method: string | undefined, url: string | undefined, cmdOpts: Record<string, unknown>) => {
+    const { runHttp } = await import('./commands/http.js');
+    await runHttp(method, url, {
+      header: cmdOpts['header'] as string[] | undefined,
+      body: cmdOpts['body'] as string | undefined,
+      bearer: cmdOpts['bearer'] as string | undefined,
+      json: cmdOpts['json'] as boolean | undefined,
+      timing: cmdOpts['timing'] as boolean | undefined,
+      verbose: cmdOpts['verbose'] as boolean | undefined,
+      output: cmdOpts['output'] as string | undefined,
+      noColor: cmdOpts['color'] === false,
+    });
   });
 
 // ── doctor ────────────────────────────────────────────────────────────────────
