@@ -735,6 +735,24 @@ program
     });
   });
 
+// ── md2pdf ───────────────────────────────────────────────────────────────────
+program
+  .command('md2pdf [file]')
+  .description('Convert a Markdown file to PDF')
+  .option('-o, --output <path>', 'output file path (default: <input>.pdf)')
+  .option('--title <title>', 'PDF document title')
+  .option('--style <name>', 'style preset: default, minimal, academic')
+  .option('--font-size <n>', 'body font size (default: 11)')
+  .action(async (file: string | undefined, cmdOpts: Record<string, unknown>) => {
+    const { runMd2Pdf } = await import('./commands/md2pdf.js');
+    await runMd2Pdf(file, {
+      output: cmdOpts['output'] as string | undefined,
+      title: cmdOpts['title'] as string | undefined,
+      style: cmdOpts['style'] as string | undefined,
+      fontSize: cmdOpts['fontSize'] ? parseInt(String(cmdOpts['fontSize']), 10) : undefined,
+    });
+  });
+
 // ── doctor ────────────────────────────────────────────────────────────────────
 program
   .command('doctor')
