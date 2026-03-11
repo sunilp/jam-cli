@@ -1,6 +1,6 @@
 # Jam Utilities — Zero-LLM Developer Tools
 
-Jam includes 12 built-in utility commands that work **without any AI provider**. No Ollama, no API keys, no network calls. They are pure algorithmic tools that run instantly on your local codebase.
+Jam includes 14 built-in utility commands that work **without any AI provider**. No Ollama, no API keys, no network calls. They are pure algorithmic tools that run instantly on your local codebase.
 
 Think of them as a developer swiss army knife built into your CLI.
 
@@ -20,6 +20,8 @@ Think of them as a developer swiss army knife built into your CLI.
 | [`jam convert`](convert.md) | Convert between JSON, YAML, CSV, base64, URL, hex |
 | [`jam pack`](pack.md) | Package.json analyzer: sizes, unused deps |
 | [`jam http`](http.md) | HTTP client with auto JSON formatting |
+| [`jam md2pdf`](#jam-md2pdf) | Convert Markdown files to styled PDFs |
+| [`jam diagram --no-ai`](diagram.md) | Generate Mermaid architecture diagrams from code |
 
 ## Common Patterns
 

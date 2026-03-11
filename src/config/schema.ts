@@ -95,6 +95,12 @@ export const JamConfigSchema = z.object({
   cacheEnabled: z.boolean().default(true),
   /** Cache TTL in seconds (default: 3600 = 1 hour). */
   cacheTtlSeconds: z.number().int().positive().default(3600),
+  /** Additional directories to scan for plugins (beyond ~/.jam/plugins/). */
+  pluginDirs: z.array(z.string()).optional(),
+  /** Only load these plugins (allowlist by name). Empty = load all. */
+  enabledPlugins: z.array(z.string()).optional(),
+  /** Never load these plugins (denylist by name). */
+  disabledPlugins: z.array(z.string()).optional(),
 });
 export type JamConfig = z.infer<typeof JamConfigSchema>;
 

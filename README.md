@@ -26,23 +26,25 @@
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 [![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-yellow.svg)](https://conventionalcommits.org)
 
-Ask questions · Trace call graphs · Review diffs · Generate patches · Run agentic tasks · Connect to MCP servers · 12 built-in dev utilities
+Ask questions · Trace call graphs · Review diffs · Generate patches · Run agentic tasks · Connect to MCP servers · Generate diagrams · Plugin system · 14 built-in dev utilities
 
 *All from your command line, powered by Ollama, OpenAI, Anthropic, Groq, or any compatible provider.*
 
-[Getting Started](#quick-start) · [Commands](#commands) · [Utilities](#developer-utilities-zero-llm) · [MCP](#jam-mcp) · [Configuration](#configuration) · [Contributing](#contributing)
+[Getting Started](#quick-start) · [Commands](#commands) · [Utilities](#developer-utilities-zero-llm) · [MCP](#jam-mcp) · [Plugins](#plugin-system) · [Configuration](#configuration) · [Contributing](#contributing)
 
 </div>
 
 ---
 
-> ### What's New in v0.5.0
+> ### What's New in v0.6.0
 >
-> **MCP (Model Context Protocol) support** — Connect to any MCP-compatible tool server over stdio. Per-server enable/disable, group-based activation, tool approval policies (auto/ask/deny), and fine-grained allowlist/denylist filtering. [Full docs](docs/mcp.md)
+> **Plugin system** — Extend Jam with custom commands. Drop a plugin into `~/.jam/plugins/` with a `jam-plugin.json` manifest and an `index.js` entry point. Supports enable/disable lists, project-level plugins, and conflict detection. [Full docs](docs/plugins.md)
 >
-> **12 zero-LLM developer utilities** — A swiss army knife built into your CLI. No AI provider needed. `jam todo`, `jam ports`, `jam recent`, `jam stats`, `jam hash`, `jam env`, `jam deps`, `jam dup`, `jam json`, `jam convert`, `jam pack`, `jam http`. [Full docs](docs/utilities.md)
+> **`jam diagram`** — Generate Mermaid architecture diagrams from your codebase. Static analysis maps modules, dependencies, symbols, and cycles. AI refinement optional. Supports architecture, deps, class, and flow diagram types. [Full docs](docs/diagram.md)
 >
-> **MCP governance** — Group servers by profile (code, jira, db, browser), activate groups via `mcpGroups`, control tool exposure per server with `allowedTools`/`deniedTools`.
+> **`jam md2pdf`** — Convert Markdown files to PDF with three style presets (default, minimal, academic). Supports headings, code blocks, tables, lists, links, and more.
+>
+> **14 zero-LLM developer utilities** — `jam todo`, `jam ports`, `jam recent`, `jam stats`, `jam hash`, `jam env`, `jam deps`, `jam dup`, `jam json`, `jam convert`, `jam pack`, `jam http`, `jam md2pdf`, `jam diagram --no-ai`. [Full docs](docs/utilities.md)
 
 ---
 
@@ -82,7 +84,10 @@ Most AI coding tools are built around a single vendor's model, require a browser
 | 🐚 | **Shell completions** | Bash and Zsh |
 | 🏠 | **Privacy-first** | Runs locally — your code never leaves your machine |
 | 🔗 | **MCP support** | Connect to any Model Context Protocol server — with governance, groups, and per-server policies |
-| 🧰 | **12 dev utilities** | `todo`, `ports`, `stats`, `deps`, `dup`, `env`, `hash`, `json`, `convert`, `http`, `pack`, `recent` — zero LLM required |
+| 🔌 | **Plugin system** | Drop custom commands into `~/.jam/plugins/` — manifest-based, enable/disable, project-level |
+| 📊 | **Diagram generation** | `jam diagram` generates Mermaid architecture diagrams from static code analysis |
+| 📄 | **Markdown to PDF** | `jam md2pdf` converts `.md` files to styled PDFs with three presets |
+| 🧰 | **14 dev utilities** | `todo`, `ports`, `stats`, `deps`, `dup`, `env`, `hash`, `json`, `convert`, `http`, `pack`, `recent`, `md2pdf`, `diagram` — zero LLM required |
 
 ---
 
@@ -647,6 +652,103 @@ Follow the printed instructions to add the completion to your shell.
 
 ---
 
+### `jam diagram`
+
+Generate Mermaid architecture diagrams from your codebase. Analyzes modules, dependencies, symbols, and cycles using static analysis. AI refinement is optional. [Full documentation](docs/diagram.md)
+
+```bash
+jam diagram                              # architecture diagram with AI
+jam diagram --no-ai                      # deterministic diagram (no AI needed)
+jam diagram --no-ai --type class         # class diagram
+jam diagram --no-ai --type deps          # dependency flow
+jam diagram --no-ai --focus providers    # focus on a specific module
+jam diagram --json                       # raw analysis as JSON
+jam diagram --no-ai -o arch.mmd          # save to file
+jam diagram --exclude test-utils         # exclude directories
+```
+
+**Diagram types:**
+
+| Type | Description |
+|------|-------------|
+| `architecture` | Top-down module graph with dependency edges and weights (default) |
+| `deps` | Left-to-right dependency flow |
+| `class` | Class/interface/enum diagram |
+| `flow` | Control flow between components |
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--type <type>` | `architecture`, `deps`, `flow`, `class` (default: `architecture`) |
+| `-o, --output <file>` | Write Mermaid to file |
+| `--json` | Output raw project analysis as JSON |
+| `--no-ai` | Deterministic diagram without AI |
+| `--focus <module>` | Highlight a specific module |
+| `--exclude <dirs>` | Comma-separated directories to exclude |
+
+---
+
+### `jam md2pdf`
+
+Convert Markdown files to PDF using lightweight rendering (no browser dependency). Supports headings, bold/italic, code blocks, lists, tables, links, blockquotes, and horizontal rules.
+
+```bash
+jam md2pdf README.md                          # convert to README.pdf
+jam md2pdf notes.md -o notes.pdf              # custom output path
+jam md2pdf spec.md --style academic           # Times Roman, academic look
+jam md2pdf doc.md --style minimal             # clean black & white
+jam md2pdf doc.md --title "API Spec"          # custom PDF title
+jam md2pdf doc.md --font-size 13              # larger body text
+```
+
+**Style presets:**
+
+| Style | Font | Description |
+|-------|------|-------------|
+| `default` | Helvetica | Blue headings, colored links, modern feel |
+| `minimal` | Helvetica | Black & white, clean, no color |
+| `academic` | Times Roman | Traditional academic document style |
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `-o, --output <path>` | Output file path (default: `<input>.pdf`) |
+| `--title <title>` | PDF document title metadata |
+| `--style <name>` | `default`, `minimal`, `academic` |
+| `--font-size <n>` | Body font size (default: 11) |
+
+---
+
+### `jam plugin`
+
+Manage plugins. Plugins extend Jam with custom commands. [Full documentation](docs/plugins.md)
+
+```bash
+jam plugin list              # show installed plugins
+jam plugin list --json       # machine-readable output
+```
+
+**Creating a plugin:**
+
+```bash
+mkdir -p ~/.jam/plugins/my-plugin
+# Create jam-plugin.json and index.js (see docs/plugins.md)
+```
+
+**Configuration** (in `.jamrc`):
+
+```json
+{
+  "pluginDirs": ["/path/to/extra/plugins"],
+  "enabledPlugins": ["my-plugin"],
+  "disabledPlugins": ["unwanted-plugin"]
+}
+```
+
+---
+
 ### `jam doctor`
 
 Run system diagnostics:
@@ -708,7 +810,7 @@ jam mcp list --json         # structured JSON output
 
 ## Developer Utilities (Zero-LLM)
 
-12 built-in commands that work **without any AI provider**. No API keys, no network calls. Pure algorithmic tools for everyday development. [Full documentation](docs/utilities.md)
+14 built-in commands that work **without any AI provider**. No API keys, no network calls. Pure algorithmic tools for everyday development. [Full documentation](docs/utilities.md)
 
 ### `jam todo`
 
@@ -854,6 +956,52 @@ jam http GET https://api.example.com \
 jam http GET https://api.example.com --output out.json  # save to file
 ```
 
+### `jam md2pdf`
+
+Convert Markdown to PDF with style presets. [Docs](#jam-md2pdf)
+
+```bash
+jam md2pdf README.md                     # convert to PDF
+jam md2pdf notes.md --style academic     # Times Roman style
+jam md2pdf doc.md -o output.pdf          # custom output path
+```
+
+### `jam diagram --no-ai`
+
+Generate architecture diagrams from static analysis. [Docs](docs/diagram.md)
+
+```bash
+jam diagram --no-ai                      # architecture diagram
+jam diagram --no-ai --type class         # class diagram
+jam diagram --no-ai --focus providers    # focus on a module
+jam diagram --json                       # raw analysis JSON
+```
+
+---
+
+## Plugin System
+
+Extend Jam with custom commands by dropping plugin directories into `~/.jam/plugins/`. [Full documentation](docs/plugins.md)
+
+```bash
+# List installed plugins
+jam plugin list
+
+# Create a plugin
+mkdir -p ~/.jam/plugins/my-tool
+# Add jam-plugin.json + index.js (see docs/plugins.md)
+
+# Use it
+jam my-command
+```
+
+Plugins register Commander.js commands and receive workspace context. Features:
+- **User-level** (`~/.jam/plugins/`) and **project-level** (`.jam/plugins/`) plugin directories
+- **Manifest-based** — `jam-plugin.json` with name, version, description, command list
+- **Enable/disable** via config: `enabledPlugins` / `disabledPlugins` arrays
+- **Non-fatal** — broken plugins are skipped; other plugins and built-in commands unaffected
+- **Conflict detection** — plugin commands that collide with built-ins are skipped
+
 ---
 
 ## Configuration
@@ -926,7 +1074,10 @@ Jam merges config in priority order (highest wins):
       "toolPolicy": "auto"
     }
   },
-  "mcpGroups": ["code"]
+  "mcpGroups": ["code"],
+  "pluginDirs": [],
+  "enabledPlugins": [],
+  "disabledPlugins": []
 }
 ```
 
@@ -943,6 +1094,9 @@ Jam merges config in priority order (highest wins):
 | `redactPatterns` | string[] | `[]` | Regex patterns redacted from logs |
 | `cacheEnabled` | boolean | `true` | Enable response caching |
 | `cacheTtlSeconds` | number | `3600` | Cache time-to-live in seconds |
+| `pluginDirs` | string[] | `[]` | Additional directories to scan for plugins |
+| `enabledPlugins` | string[] | `[]` | Only load these plugins (allowlist) |
+| `disabledPlugins` | string[] | `[]` | Never load these plugins (denylist) |
 
 ### Profile Fields
 
@@ -1074,7 +1228,7 @@ npm run dev -- ask "What is 2+2?"   # run from source with tsx
 npm run build                         # compile TypeScript to dist/
 npm run typecheck                     # tsc --noEmit
 npm run lint                          # ESLint
-npm test                              # Vitest unit tests (311 tests)
+npm test                              # Vitest unit tests (358 tests)
 npm run test:watch                    # watch mode
 npm run test:coverage                 # coverage report
 ```
@@ -1084,8 +1238,10 @@ npm run test:coverage                 # coverage report
 ```
 src/
 ├── index.ts           # CLI entry point — command registration (Commander)
-├── commands/          # One file per command (ask, chat, run, trace, verify, jira, mcp, todo, ports, …)
+├── commands/          # One file per command (ask, chat, run, trace, verify, diagram, md2pdf, …)
 ├── providers/         # LLM adapters — Ollama, OpenAI, Anthropic, Groq, Embedded
+├── analyzers/         # Shared code analysis (import graph, structure, symbols)
+├── plugins/           # Plugin loader, manager, types
 ├── integrations/      # External service clients (Jira)
 ├── mcp/               # MCP client, transport, manager, types
 ├── tools/             # Model-callable tools + registry + permission enforcement
@@ -1153,7 +1309,7 @@ Look for issues labeled [`good first issue`](https://github.com/sunilp/jam-cli/l
 ### What the Codebase Looks Like
 
 - **Strict TypeScript throughout** — no `any`, no guessing what a function does
-- **Tests colocated with source** — `foo.ts` → `foo.test.ts`, using Vitest (311 tests across 24 files)
+- **Tests colocated with source** — `foo.ts` → `foo.test.ts`, using Vitest (358 tests across 29 files)
 - **One file per concern** — each command, provider, and tool is self-contained
 - **Zod schema validation** — config is validated at load time, not at runtime when it's too late
 - **Conventional Commits** — the git log tells the story of the project
@@ -1192,8 +1348,10 @@ We take security seriously. If you discover a vulnerability, please **do not** o
 - [x] Response caching (`jam cache`)
 - [x] Actionable error messages with hints
 - [x] MCP (Model Context Protocol) support with governance
-- [x] 12 zero-LLM developer utilities
-- [ ] Plugin system for custom tools
+- [x] 14 zero-LLM developer utilities
+- [x] Plugin system for custom commands
+- [x] Architecture diagram generation (`jam diagram`)
+- [x] Markdown to PDF conversion (`jam md2pdf`)
 - [ ] Token usage tracking and budgets
 - [ ] Embeddings & vector search
 - [ ] Web UI companion
@@ -1203,15 +1361,6 @@ We take security seriously. If you discover a vulnerability, please **do not** o
 ## Probable Enhancements
 
 > Ideas and directions under consideration. These range from quick wins to deep architectural changes. Contributions, RFCs, and discussion on any of these are welcome.
-
-### Plugin System
-
-The tool registry (`ToolRegistry.register()`) already accepts any `ToolDefinition`, but tool discovery is hardcoded. A proper plugin system would allow external tools without modifying source.
-
-- **Local plugins** — load `ToolDefinition` modules from `.jam/plugins/` or `~/.config/jam/plugins/`
-- **npm plugin packages** — `jam plugin install @scope/jam-plugin-docker` discovers and registers tools at startup
-- **Plugin manifest** — declarative `jam-plugin.json` with name, version, tool definitions, required permissions
-- **Sandboxed execution** — plugins run with restricted filesystem/network access based on declared capabilities
 
 ### Skills
 

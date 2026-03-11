@@ -753,6 +753,47 @@ program
     });
   });
 
+// ── diagram ──────────────────────────────────────────────────────────────────
+program
+  .command('diagram [scope]')
+  .description('Generate architecture diagrams from code analysis (Mermaid output)')
+  .option('--type <type>', 'diagram type: architecture, deps, flow, class (default: architecture)')
+  .option('-o, --output <file>', 'write Mermaid output to file instead of stdout')
+  .option('--json', 'output raw analysis data as JSON (no AI)')
+  .option('--no-ai', 'generate a deterministic diagram without AI')
+  .option('--focus <module>', 'highlight a specific module and its connections')
+  .option('--exclude <dirs>', 'comma-separated directories to exclude')
+  .action(async (scope: string | undefined, cmdOpts: Record<string, unknown>) => {
+    const g = globalOpts();
+    const { runDiagram } = await import('./commands/diagram.js');
+    await runDiagram(scope, {
+      profile: g.profile,
+      provider: g.provider,
+      model: g.model,
+      baseUrl: g.baseUrl,
+      noColor: g.color === false,
+      quiet: g.quiet,
+      type: cmdOpts['type'] as string | undefined,
+      output: cmdOpts['output'] as string | undefined,
+      json: cmdOpts['json'] as boolean | undefined,
+      noAi: cmdOpts['ai'] === false,
+      focus: cmdOpts['focus'] as string | undefined,
+      exclude: cmdOpts['exclude'] as string | undefined,
+    });
+  });
+
+// ── plugin ───────────────────────────────────────────────────────────────────
+const pluginCmd = program.command('plugin').description('Manage jam plugins');
+
+pluginCmd
+  .command('list')
+  .description('List installed plugins')
+  .option('--json', 'output as JSON')
+  .action(async (cmdOpts: Record<string, unknown>) => {
+    const { runPluginList } = await import('./commands/plugin.js');
+    await runPluginList({ json: cmdOpts['json'] as boolean | undefined });
+  });
+
 // ── doctor ────────────────────────────────────────────────────────────────────
 program
   .command('doctor')
@@ -763,6 +804,56 @@ program
     await runDoctor({ profile: g.profile, provider: g.provider, baseUrl: g.baseUrl });
   });
 
+// ── Plugin loading ───────────────────────────────────────────────────────────
+async function loadPlugins(): Promise<void> {
+  try {
+    const { homedir } = await import('node:os');
+    const { existsSync } = await import('node:fs');
+    const { PluginManager } = await import('./plugins/manager.js');
+    const { loadConfig } = await import('./config/loader.js');
+    const { getWorkspaceRoot } = await import('./utils/workspace.js');
+    const { printError, printWarning, printSuccess } = await import('./ui/renderer.js');
+
+    const config = await loadConfig(process.cwd());
+
+    const pluginDirs = [
+      join(homedir(), '.jam', 'plugins'),
+    ];
+
+    // Add workspace-level plugins if in a git repo
+    try {
+      const wsRoot = await getWorkspaceRoot();
+      pluginDirs.push(join(wsRoot, '.jam', 'plugins'));
+    } catch { /* not in a git repo — skip workspace plugins */ }
+
+    // Add config-level plugin directories
+    if (config.pluginDirs) {
+      pluginDirs.push(...config.pluginDirs);
+    }
+
+    // Only proceed if at least one plugin directory exists
+    if (!pluginDirs.some((d) => existsSync(d))) return;
+
+    const manager = new PluginManager();
+    await manager.loadAll(pluginDirs, {
+      enabled: config.enabledPlugins,
+      disabled: config.disabledPlugins,
+    });
+
+    if (manager.hasPlugins) {
+      let wsRoot = process.cwd();
+      try { wsRoot = await getWorkspaceRoot(); } catch { /* use cwd */ }
+
+      await manager.registerAll(program, {
+        workspaceRoot: wsRoot,
+        ui: { printError, printWarning, printSuccess },
+      });
+    }
+  } catch {
+    // Plugin loading is non-fatal — silently continue
+  }
+}
+
 // ── Default action (no subcommand): print banner then help ──────────────────
 if (process.argv.slice(2).length === 0) {
   const noColor = process.argv.includes('--no-color');
@@ -770,4 +861,6 @@ if (process.argv.slice(2).length === 0) {
   program.help();
 }
 
+// Load plugins then parse
+await loadPlugins();
 program.parse();
