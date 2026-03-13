@@ -9,5 +9,6 @@ coverage/
 *.tsbuildinfo
 .jam/
 .claude/
+CLAUDE.md
 improvements.md
 
