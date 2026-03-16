@@ -62,6 +62,28 @@ function getApiKey(profileApiKey?: string): string | undefined {
   return profileApiKey ?? process.env['OPENAI_API_KEY'];
 }
 
+/** Check if a 429 response body indicates permanent quota exhaustion vs transient rate limit. */
+function isQuotaExhausted(body: string): boolean {
+  const lower = body.toLowerCase();
+  return lower.includes('insufficient_quota') || lower.includes('exceeded');
+}
+
+/** Handle a 429 response: throw quota or rate-limit error. */
+function handle429(body: string, statusCode: number): never {
+  if (isQuotaExhausted(body)) {
+    throw new JamError(
+      'OpenAI API quota exhausted. Check your billing at https://platform.openai.com/account/billing',
+      'PROVIDER_QUOTA_EXHAUSTED',
+      { retryable: false, statusCode }
+    );
+  }
+  throw new JamError(
+    'OpenAI rate limit reached. Try again shortly.',
+    'PROVIDER_RATE_LIMITED',
+    { retryable: true, statusCode }
+  );
+}
+
 export class OpenAIAdapter implements ProviderAdapter {
   readonly info: ProviderInfo = {
     name: 'openai',
@@ -183,11 +205,7 @@ export class OpenAIAdapter implements ProviderAdapter {
     }
 
     if (response.status === 429) {
-      throw new JamError(
-        'OpenAI rate limit reached. Try again shortly.',
-        'PROVIDER_RATE_LIMITED',
-        { retryable: true, statusCode: response.status }
-      );
+      handle429(await response.text().catch(() => ''), response.status);
     }
 
     if (!response.ok) {
@@ -306,6 +324,10 @@ export class OpenAIAdapter implements ProviderAdapter {
         'PROVIDER_AUTH_FAILED',
         { retryable: false, statusCode: response.status }
       );
+    }
+
+    if (response.status === 429) {
+      handle429(await response.text().catch(() => ''), response.status);
     }
 
     if (!response.ok) {

@@ -4,6 +4,7 @@ export type ErrorCode =
   | 'PROVIDER_AUTH_FAILED'
   | 'PROVIDER_UNAVAILABLE'
   | 'PROVIDER_RATE_LIMITED'
+  | 'PROVIDER_QUOTA_EXHAUSTED'
   | 'PROVIDER_STREAM_ERROR'
   | 'PROVIDER_MODEL_NOT_FOUND'
   | 'INPUT_MISSING'
@@ -37,6 +38,10 @@ export const ERROR_HINTS: Partial<Record<ErrorCode, string>> = {
   PROVIDER_RATE_LIMITED:
     'You\'ve hit the provider\'s rate limit. Wait a moment and try again.\n' +
     'Consider switching to a local provider: `jam ask --provider ollama "your question"`',
+  PROVIDER_QUOTA_EXHAUSTED:
+    'Your API quota is exhausted. This is NOT a transient error — retrying will not help.\n' +
+    'Check your billing/plan at your provider\'s dashboard and add credits.\n' +
+    'Or switch to a local provider: `jam ask --provider ollama "your question"`',
   PROVIDER_MODEL_NOT_FOUND:
     'The model is not available. Check available models with: `jam models list`\n' +
     'For Ollama, pull the model first: `ollama pull <model-name>`',

@@ -1309,12 +1309,29 @@ Look for issues labeled [`good first issue`](https://github.com/sunilp/jam-cli/l
 ### What the Codebase Looks Like
 
 - **Strict TypeScript throughout** — no `any`, no guessing what a function does
-- **Tests colocated with source** — `foo.ts` → `foo.test.ts`, using Vitest (358 tests across 29 files)
+- **Tests colocated with source** — `foo.ts` → `foo.test.ts`, using Vitest (363 tests across 29 files)
 - **One file per concern** — each command, provider, and tool is self-contained
 - **Zod schema validation** — config is validated at load time, not at runtime when it's too late
 - **Conventional Commits** — the git log tells the story of the project
 
 If you can read TypeScript, you can contribute to Jam.
+
+---
+
+## Troubleshooting
+
+Every error includes an actionable hint. Here are the most common issues:
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `PROVIDER_QUOTA_EXHAUSTED` | API billing/credits used up | Add credits at your provider's dashboard, or switch to Ollama |
+| `PROVIDER_RATE_LIMITED` | Too many requests per minute | Wait a moment and retry, or use a local provider |
+| `PROVIDER_AUTH_FAILED` | Missing or invalid API key | `export ANTHROPIC_API_KEY=sk-ant-...` (or `OPENAI_API_KEY`, `GROQ_API_KEY`) |
+| `PROVIDER_UNAVAILABLE` | Provider unreachable | Check network; for Ollama run `ollama serve` |
+| `PROVIDER_MODEL_NOT_FOUND` | Model name typo or not pulled | `jam models list` to see available; `ollama pull <model>` for Ollama |
+| `CONFIG_INVALID` | Bad `.jamrc` syntax | `jam config show` to inspect, or `jam init` to regenerate |
+
+Run `jam doctor` for a full system diagnostic.
 
 ---
 

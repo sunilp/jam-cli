@@ -211,6 +211,16 @@ export class AnthropicAdapter implements ProviderAdapter {
     }
 
     if (response.status === 429) {
+      const errorBody = await response.text().catch(() => '');
+      const lower = errorBody.toLowerCase();
+      const isQuota = lower.includes('billing') || lower.includes('quota') || lower.includes('exceeded');
+      if (isQuota) {
+        throw new JamError(
+          'Anthropic API quota exhausted. Check your billing at https://console.anthropic.com/settings/billing',
+          'PROVIDER_QUOTA_EXHAUSTED',
+          { retryable: false, statusCode: response.status }
+        );
+      }
       throw new JamError(
         'Anthropic rate limit reached. Try again shortly.',
         'PROVIDER_RATE_LIMITED',

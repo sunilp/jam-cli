@@ -91,4 +91,25 @@ describe('read_file tool', () => {
     const result = await readFileTool.execute({ path: 'all.txt' }, ctx);
     expect(result.metadata).toMatchObject({ startLine: 1, endLine: 4 });
   });
+
+  it('accepts snake_case params (start_line/end_line) from LLMs', async () => {
+    const content = Array.from({ length: 10 }, (_, i) => `line ${i + 1}`).join('\n');
+    await writeFile(join(tmpDir, 'snake.txt'), content);
+    const result = await readFileTool.execute({ path: 'snake.txt', start_line: 3, end_line: 5 }, ctx);
+    expect(result.output).toContain('     3\tline 3');
+    expect(result.output).toContain('     5\tline 5');
+    expect(result.output).not.toContain('line 2');
+    expect(result.output).not.toContain('line 6');
+    expect(result.metadata).toMatchObject({ startLine: 3, endLine: 5 });
+  });
+
+  it('coerces string line numbers from small models', async () => {
+    const content = Array.from({ length: 10 }, (_, i) => `line ${i + 1}`).join('\n');
+    await writeFile(join(tmpDir, 'str.txt'), content);
+    const result = await readFileTool.execute({ path: 'str.txt', start_line: '4', end_line: '6' }, ctx);
+    expect(result.output).toContain('     4\tline 4');
+    expect(result.output).toContain('     6\tline 6');
+    expect(result.output).not.toContain('line 3');
+    expect(result.output).not.toContain('line 7');
+  });
 });

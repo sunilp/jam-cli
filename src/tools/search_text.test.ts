@@ -127,4 +127,18 @@ describe('search_text tool (Node.js fallback)', () => {
     const result = await searchTextTool.execute({ query: 'pattern' }, ctx);
     expect(result.metadata?.['matchCount']).toBe(2);
   });
+
+  it('accepts snake_case max_results param from LLMs', async () => {
+    const lines = Array.from({ length: 20 }, (_, i) => `match line ${i}`).join('\n');
+    await writeFile(join(tmpDir, 'many.txt'), lines);
+    const result = await searchTextTool.execute({ query: 'match line', max_results: 3 }, ctx);
+    expect(result.metadata?.['matchCount']).toBeLessThanOrEqual(3);
+  });
+
+  it('coerces string max_results from small models', async () => {
+    const lines = Array.from({ length: 20 }, (_, i) => `match line ${i}`).join('\n');
+    await writeFile(join(tmpDir, 'many2.txt'), lines);
+    const result = await searchTextTool.execute({ query: 'match line', max_results: '2' }, ctx);
+    expect(result.metadata?.['matchCount']).toBeLessThanOrEqual(2);
+  });
 });

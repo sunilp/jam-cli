@@ -97,7 +97,7 @@ describe('OpenAIAdapter.streamCompletion', () => {
     }).rejects.toMatchObject({ code: 'PROVIDER_MODEL_NOT_FOUND' });
   });
 
-  it('throws PROVIDER_RATE_LIMITED on 429', async () => {
+  it('throws PROVIDER_RATE_LIMITED on 429 (transient)', async () => {
     server.use(
       http.post(`${BASE_URL}/v1/chat/completions`, () => {
         return new HttpResponse('rate limited', { status: 429 });
@@ -109,7 +109,25 @@ describe('OpenAIAdapter.streamCompletion', () => {
 
     await expect(async () => {
       for await (const _chunk of iter) { /* consume */ }
-    }).rejects.toMatchObject({ code: 'PROVIDER_RATE_LIMITED' });
+    }).rejects.toMatchObject({ code: 'PROVIDER_RATE_LIMITED', retryable: true });
+  });
+
+  it('throws PROVIDER_QUOTA_EXHAUSTED on 429 with insufficient_quota', async () => {
+    server.use(
+      http.post(`${BASE_URL}/v1/chat/completions`, () => {
+        return new HttpResponse(
+          JSON.stringify({ error: { message: 'You exceeded your current quota', type: 'insufficient_quota', code: 'insufficient_quota' } }),
+          { status: 429 }
+        );
+      })
+    );
+
+    const adapter = new OpenAIAdapter({ baseUrl: BASE_URL, apiKey: API_KEY });
+    const iter = adapter.streamCompletion({ messages: [{ role: 'user', content: 'hi' }] });
+
+    await expect(async () => {
+      for await (const _chunk of iter) { /* consume */ }
+    }).rejects.toMatchObject({ code: 'PROVIDER_QUOTA_EXHAUSTED', retryable: false });
   });
 
   it('throws PROVIDER_STREAM_ERROR on non-OK response', async () => {

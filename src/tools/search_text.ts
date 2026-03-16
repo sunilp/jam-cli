@@ -168,9 +168,13 @@ export const searchTextTool: ToolDefinition = {
     }
 
     const glob = typeof args['glob'] === 'string' ? args['glob'] : undefined;
+    // Accept both camelCase (tool schema) and snake_case (LLM-preferred) param names.
+    // Coerce strings to numbers since smaller models may return "5" instead of 5.
+    const rawMax = args['maxResults'] ?? args['max_results'];
+    const parsedMax = typeof rawMax === 'number' ? rawMax : Number(rawMax);
     const maxResults =
-      typeof args['maxResults'] === 'number' && args['maxResults'] > 0
-        ? args['maxResults']
+      Number.isFinite(parsedMax) && parsedMax > 0
+        ? parsedMax
         : DEFAULT_MAX_RESULTS;
 
     const absoluteRoot = resolve(ctx.workspaceRoot);

@@ -72,12 +72,17 @@ export const readFileTool: ToolDefinition = {
 
     const lines = content.split('\n');
 
-    const startLine =
-      typeof args['startLine'] === 'number' ? Math.max(1, args['startLine']) : 1;
-    const endLine =
-      typeof args['endLine'] === 'number'
-        ? Math.min(args['endLine'], lines.length)
-        : lines.length;
+    // Accept both camelCase (tool schema) and snake_case (LLM-preferred) param names.
+    // Also coerce strings to numbers since smaller models may return "50" instead of 50.
+    const rawStart = args['startLine'] ?? args['start_line'];
+    const rawEnd = args['endLine'] ?? args['end_line'];
+    const parsedStart = typeof rawStart === 'number' ? rawStart : Number(rawStart);
+    const parsedEnd = typeof rawEnd === 'number' ? rawEnd : Number(rawEnd);
+
+    const startLine = Number.isFinite(parsedStart) ? Math.max(1, parsedStart) : 1;
+    const endLine = Number.isFinite(parsedEnd)
+      ? Math.min(parsedEnd, lines.length)
+      : lines.length;
 
     const selectedLines = lines.slice(startLine - 1, endLine);
 

@@ -63,6 +63,22 @@ async function readPromptFromStdin(): Promise<string | null> {
 
 // ── Main command ──────────────────────────────────────────────────────────────
 
+/**
+ * Strip XML-style tool call blocks that models sometimes emit as literal text.
+ * These are not real tool calls — just the model echoing tool-call syntax.
+ */
+function stripToolCallLeakage(text: string): string {
+  // Remove <function_calls>...</function_calls> blocks (including partial/nested)
+  let cleaned = text.replace(/<function_calls>[\s\S]*?<\/function_calls>/g, '');
+  // Remove <invoke ...>...</invoke> blocks
+  cleaned = cleaned.replace(/<invoke\s[^>]*>[\s\S]*?<\/invoke>/g, '');
+  // Remove unclosed <function_calls> at end of text (partial emission)
+  cleaned = cleaned.replace(/<function_calls>[\s\S]*$/g, '');
+  // Clean up excess blank lines left behind
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+  return cleaned.trim();
+}
+
 /** Render the final answer (shared by tool-loop exit and synthesis). */
 async function renderFinalAnswer(
   text: string,
@@ -72,14 +88,15 @@ async function renderFinalAnswer(
   noColor: boolean,
   stderrLog: (msg: string) => void,
 ): Promise<void> {
+  const sanitized = stripToolCallLeakage(text);
   if (options.json) {
-    printJsonResult({ response: text, usage, model: profile.model });
+    printJsonResult({ response: sanitized, usage, model: profile.model });
   } else {
     try {
-      const rendered = await renderMarkdown(text);
+      const rendered = await renderMarkdown(sanitized);
       process.stdout.write(rendered);
     } catch {
-      process.stdout.write(text + '\n');
+      process.stdout.write(sanitized + '\n');
     }
   }
 
