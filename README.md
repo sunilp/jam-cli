@@ -27,11 +27,11 @@
 [![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-yellow.svg)](https://conventionalcommits.org)
 [![Website](https://img.shields.io/badge/Website-jam.sunilprakash.com-2d7d6f)](https://jam.sunilprakash.com)
 
-Ask questions · Trace call graphs · Review diffs · Generate patches · Run agentic tasks · Connect to MCP servers · Generate diagrams · Plugin system · 14 built-in dev utilities
+Ask questions · Trace call graphs · Review diffs · Generate patches · Run agentic tasks · Connect to MCP servers · Generate diagrams · Plugin system · Git toolkit · 19 built-in dev utilities
 
 *All from your command line, powered by Ollama, OpenAI, Anthropic, Groq, or any compatible provider.*
 
-[Getting Started](#quick-start) · [Commands](#commands) · [Utilities](#developer-utilities-zero-llm) · [MCP](#jam-mcp) · [Plugins](#plugin-system) · [Configuration](#configuration) · [Contributing](#contributing)
+[Getting Started](#quick-start) · [Commands](#commands) · [Git Toolkit](#jam-git--git-productivity-toolkit) · [Utilities](#developer-utilities-zero-llm) · [Enterprise](#enterprise-configuration) · [MCP](#jam-mcp) · [Plugins](#plugin-system) · [Configuration](#configuration) · [Contributing](#contributing)
 
 </div>
 
@@ -45,7 +45,13 @@ Ask questions · Trace call graphs · Review diffs · Generate patches · Run ag
 >
 > **`jam md2pdf`** — Convert Markdown files to PDF with three style presets (default, minimal, academic). Supports headings, code blocks, tables, lists, links, and more.
 >
-> **14 zero-LLM developer utilities** — `jam todo`, `jam ports`, `jam recent`, `jam stats`, `jam hash`, `jam env`, `jam deps`, `jam dup`, `jam json`, `jam convert`, `jam pack`, `jam http`, `jam md2pdf`, `jam diagram --no-ai`. [Full docs](docs/utilities.md)
+> **19 zero-LLM developer utilities** — `jam todo`, `jam ports`, `jam recent`, `jam stats`, `jam hash`, `jam env`, `jam deps`, `jam dup`, `jam json`, `jam convert`, `jam pack`, `jam http`, `jam md2pdf`, `jam diagram --no-ai`. [Full docs](docs/utilities.md)
+>
+> **`jam git` toolkit** — `jam git wtf` explains repo state in plain English, `jam git undo` reverses mistakes, `jam git cleanup` prunes branches, `jam git standup` shows your work, `jam git oops` fixes common errors.
+>
+> **Enterprise ready** — HTTP proxy support (`HTTP_PROXY`/`HTTPS_PROXY`), custom CA certificates (`tlsCaPath`), configurable request timeouts (`requestTimeoutMs`). Works behind corporate firewalls.
+>
+> **Embedded provider graduated** — No longer experimental. Smart guardrails block complex commands (diff, review, commit) with helpful "use a bigger model" messages.
 
 ---
 
@@ -79,7 +85,7 @@ Most AI coding tools are built around a single vendor's model, require a browser
 | 🔌 | **5 providers** | Ollama, OpenAI, Anthropic, Groq, Embedded — adapter pattern for adding any LLM |
 | 🧠 | **Auto-detection** | `--model claude-sonnet-4-20250514` auto-selects the right provider — no `--provider` needed |
 | 💾 | **Response caching** | Identical prompts return cached results instantly — saves API calls and money |
-| 📦 | **Embedded inference** | **[Experimental]** Tiny GGUF model runs directly in-process via `node-llama-cpp` |
+| 📦 | **Embedded inference** | Tiny GGUF model runs directly in-process via `node-llama-cpp` — no server needed |
 | ⚙️ | **Layered config** | Global → repo → CLI flags; multiple named profiles |
 | 🔐 | **Secure secrets** | OS keychain via keytar, env var fallback |
 | 🐚 | **Shell completions** | Bash and Zsh |
@@ -88,7 +94,9 @@ Most AI coding tools are built around a single vendor's model, require a browser
 | 🔌 | **Plugin system** | Drop custom commands into `~/.jam/plugins/` — manifest-based, enable/disable, project-level |
 | 📊 | **Diagram generation** | `jam diagram` generates Mermaid architecture diagrams from static code analysis |
 | 📄 | **Markdown to PDF** | `jam md2pdf` converts `.md` files to styled PDFs with three presets |
-| 🧰 | **14 dev utilities** | `todo`, `ports`, `stats`, `deps`, `dup`, `env`, `hash`, `json`, `convert`, `http`, `pack`, `recent`, `md2pdf`, `diagram` — zero LLM required |
+| 🔧 | **Git toolkit** | `jam git wtf` explains state, `undo` reverses mistakes, `cleanup` prunes branches, `standup` shows your work, `oops` fixes common errors |
+| 🌐 | **Enterprise ready** | HTTP proxy support, custom CA certificates, configurable timeouts — works behind corporate firewalls |
+| 🧰 | **19 dev utilities** | `todo`, `ports`, `stats`, `deps`, `dup`, `env`, `hash`, `json`, `convert`, `http`, `pack`, `recent`, `md2pdf`, `diagram`, `git wtf/undo/cleanup/standup/oops` — zero LLM required |
 
 ---
 
@@ -131,7 +139,7 @@ Most AI coding tools are built around a single vendor's model, require a browser
 | **OpenAI** | ✅ Supported | Requires `OPENAI_API_KEY` |
 | **Anthropic** | ✅ Supported | Requires `ANTHROPIC_API_KEY`; Claude models with tool calling |
 | **Groq** | ✅ Supported | Requires `GROQ_API_KEY` |
-| **Embedded** | ⚗️ Experimental | In-process via `node-llama-cpp`, no server needed |
+| **Embedded** | ✅ Supported | In-process via `node-llama-cpp`, no server needed (best for simple Q&A) |
 
 **Provider auto-detection:** You don't need to specify `--provider` if you pass a model name. Jam infers the provider automatically:
 
@@ -809,9 +817,62 @@ jam mcp list --json         # structured JSON output
 
 ---
 
+## `jam git` — Git Productivity Toolkit
+
+5 built-in git commands that explain state, undo mistakes, and help you stay productive. Zero LLM required.
+
+```bash
+jam git wtf                    # explain current repo state in plain English
+jam git undo                   # detect last operation, show safe undo command
+jam git undo --dry             # preview without executing
+jam git cleanup                # delete merged branches, prune stale remotes
+jam git cleanup --dry          # preview what would be deleted
+jam git standup                # your commits today (across all branches)
+jam git standup --days 7       # last 7 days
+jam git standup --author "Jane"# filter by author
+jam git oops                   # quick reference: 10 common git mistakes + fixes
+```
+
+**`jam git wtf`** is the standout — it reads the repo and tells you exactly what's going on:
+- Branch name, HEAD position, upstream tracking
+- Ahead/behind counts with the exact command to fix
+- Mid-rebase, mid-merge, mid-cherry-pick detection with continue/abort commands
+- Conflict count with step-by-step resolution guide
+- Stash count, last commit, untracked files
+
+---
+
+## Enterprise Configuration
+
+Jam works behind corporate proxies, SSL-inspecting firewalls, and slow networks.
+
+```json
+{
+  "profiles": {
+    "corporate": {
+      "provider": "anthropic",
+      "baseUrl": "https://internal-proxy.company.com/anthropic",
+      "requestTimeoutMs": 300000,
+      "tlsCaPath": "/etc/ssl/corporate-ca.pem"
+    }
+  }
+}
+```
+
+| Config | Description |
+|--------|-------------|
+| `requestTimeoutMs` | Override the default 120s request timeout |
+| `tlsCaPath` | Path to PEM file with custom CA certificates |
+| `HTTP_PROXY` / `HTTPS_PROXY` | Respected automatically for all API calls |
+| `NO_PROXY` | Comma-separated hostnames to bypass proxy |
+
+All providers (Ollama, OpenAI, Anthropic, Groq) support proxy and TLS configuration.
+
+---
+
 ## Developer Utilities (Zero-LLM)
 
-14 built-in commands that work **without any AI provider**. No API keys, no network calls. Pure algorithmic tools for everyday development. [Full documentation](docs/utilities.md)
+19 built-in commands that work **without any AI provider**. No API keys, no network calls. Pure algorithmic tools for everyday development. [Full documentation](docs/utilities.md)
 
 ### `jam todo`
 
@@ -1168,11 +1229,11 @@ jam ask "Hello" --model claude-sonnet-4-20250514    # auto-selects anthropic pro
 
 ---
 
-## Embedded Provider — Experimental
-
-> **EXPERIMENTAL** — The embedded provider is functional but quality is limited by small model sizes. For production workloads, use Ollama or OpenAI.
+## Embedded Provider
 
 The `embedded` provider runs a tiny GGUF model **directly in-process** via [`node-llama-cpp`](https://github.com/withcatai/node-llama-cpp). No Ollama installation, no server process, no network calls. **Models are only downloaded when you explicitly set `provider: "embedded"`** — it never downloads anything unless you opt in.
+
+> **Best for:** Simple Q&A, quick explanations, summarization. Commands requiring complex reasoning (`diff`, `review`, `commit`, `run`, `patch`, `verify`) will suggest using a larger provider.
 
 ### Setup
 
@@ -1191,7 +1252,7 @@ jam config init --global   # then edit ~/.jam/config.json
 
 1. On first use, Jam auto-downloads a small model (~250 MB) to `~/.jam/models/`
 2. The model loads in-process using llama.cpp bindings — no external server
-3. Streaming, tool-calling, and all standard commands work as usual
+3. Simple commands (`ask --no-tools`, `explain`) work instantly
 
 ### Available Models
 
@@ -1229,7 +1290,7 @@ npm run dev -- ask "What is 2+2?"   # run from source with tsx
 npm run build                         # compile TypeScript to dist/
 npm run typecheck                     # tsc --noEmit
 npm run lint                          # ESLint
-npm test                              # Vitest unit tests (358 tests)
+npm test                              # Vitest unit tests (369 tests)
 npm run test:watch                    # watch mode
 npm run test:coverage                 # coverage report
 ```
@@ -1310,7 +1371,7 @@ Look for issues labeled [`good first issue`](https://github.com/sunilp/jam-cli/l
 ### What the Codebase Looks Like
 
 - **Strict TypeScript throughout** — no `any`, no guessing what a function does
-- **Tests colocated with source** — `foo.ts` → `foo.test.ts`, using Vitest (363 tests across 29 files)
+- **Tests colocated with source** — `foo.ts` → `foo.test.ts`, using Vitest (369 tests across 29 files)
 - **One file per concern** — each command, provider, and tool is self-contained
 - **Zod schema validation** — config is validated at load time, not at runtime when it's too late
 - **Conventional Commits** — the git log tells the story of the project
@@ -1356,7 +1417,7 @@ We take security seriously. If you discover a vulnerability, please **do not** o
 - [x] OpenAI provider
 - [x] Anthropic Claude provider
 - [x] Groq provider
-- [x] Embedded provider (experimental)
+- [x] Embedded provider
 - [x] Provider auto-detection from model name
 - [x] Structured plan-then-execute agent (`jam run`)
 - [x] Smart commit conventions (auto-detect + config)
@@ -1366,10 +1427,13 @@ We take security seriously. If you discover a vulnerability, please **do not** o
 - [x] Response caching (`jam cache`)
 - [x] Actionable error messages with hints
 - [x] MCP (Model Context Protocol) support with governance
-- [x] 14 zero-LLM developer utilities
+- [x] 19 zero-LLM developer utilities
 - [x] Plugin system for custom commands
 - [x] Architecture diagram generation (`jam diagram`)
 - [x] Markdown to PDF conversion (`jam md2pdf`)
+- [x] Git productivity toolkit (`jam git wtf/undo/cleanup/standup/oops`)
+- [x] Enterprise networking (HTTP proxy, custom CA, configurable timeouts)
+- [x] Security hardening (path traversal protection, API key redaction)
 - [ ] Token usage tracking and budgets
 - [ ] Embeddings & vector search
 - [ ] Web UI companion
