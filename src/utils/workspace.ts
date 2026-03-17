@@ -26,8 +26,25 @@ export async function findGitRoot(startDir: string = process.cwd()): Promise<str
 
 /**
  * Returns the workspace root (git root if available, otherwise cwd).
+ * When running in a VSCode terminal, uses the extension's context for accurate
+ * git root detection even when the terminal cwd is not inside a git repo.
  */
 export async function getWorkspaceRoot(cwd: string = process.cwd()): Promise<string> {
+  // Try VSCode context first — it knows the correct git root for the active file
+  const port = process.env['JAM_VSCODE_LM_PORT'];
+  if (port) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/v1/context`, {
+        signal: AbortSignal.timeout(2000),
+      });
+      if (response.ok) {
+        const ctx = await response.json() as { gitRoot?: string | null };
+        if (ctx.gitRoot) return ctx.gitRoot;
+      }
+    } catch {
+      // Server not reachable, fall through
+    }
+  }
   return findGitRoot(cwd);
 }
 
