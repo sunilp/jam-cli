@@ -28,15 +28,14 @@ export function inferProviderFromModel(model: string): string | null {
 }
 
 /**
- * Commands that require complex reasoning (tool calling, code review, diff analysis)
- * should call this after creating the adapter. If the provider is embedded, it prints
- * a warning and exits with a helpful message.
+ * Commands that require tool calling should call this after creating the adapter.
+ * If the provider does not support tools, prints a helpful message and exits.
  */
-export function blockIfEmbedded(adapter: ProviderAdapter, command: string): void {
+export function blockIfNoToolSupport(adapter: ProviderAdapter, command: string): void {
   if (adapter.info?.supportsTools === false) {
     process.stderr.write(
-      `\n  The embedded provider cannot handle "${command}" — it requires tool calling and complex reasoning.\n` +
-      `  Use a larger model instead:\n\n` +
+      `\n  The ${adapter.info.name} provider cannot handle "${command}" — it requires tool calling and complex reasoning.\n` +
+      `  Use a provider that supports tools:\n\n` +
       `    jam ${command} --provider ollama\n` +
       `    jam ${command} --provider anthropic\n` +
       `    jam ${command} --provider openai\n\n`
