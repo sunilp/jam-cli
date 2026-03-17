@@ -92,6 +92,23 @@ program
     });
   });
 
+// ── go ───────────────────────────────────────────────────────────────────────
+program
+  .command('go')
+  .description('Interactive agent — reads, writes, and runs commands in your codebase')
+  .option('--name <name>', 'name for the session')
+  .action(async (cmdOpts: Record<string, unknown>) => {
+    const g = globalOpts();
+    const { runGo } = await import('./commands/go.js');
+    await runGo({
+      profile: g.profile,
+      provider: g.provider,
+      model: g.model,
+      baseUrl: g.baseUrl,
+      name: cmdOpts['name'] as string | undefined,
+    });
+  });
+
 // ── run ───────────────────────────────────────────────────────────────────────
 program
   .command('run [instruction]')

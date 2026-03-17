@@ -6,6 +6,7 @@ import type { JamConfig } from '../config/schema.js';
 import type { McpManager } from '../mcp/manager.js';
 import { appendMessage } from '../storage/history.js';
 import { READ_ONLY_TOOL_SCHEMAS, executeReadOnlyTool } from '../tools/context-tools.js';
+import { ALL_TOOL_SCHEMAS, READONLY_TOOL_NAMES, executeTool } from '../tools/all-tools.js';
 import { getWorkspaceRoot } from '../utils/workspace.js';
 import {
   ToolCallTracker,
@@ -30,6 +31,12 @@ export interface ChatOptions {
   sessionId: string;
   initialMessages: Message[];
   mcpManager?: McpManager;
+  /** Enable write tools (write_file, apply_patch, run_command) — used by `jam go`. */
+  enableWriteTools?: boolean;
+  /** Tool approval policy — 'ask_every_time', 'allowlist', 'always', 'never'. */
+  toolPolicy?: string;
+  /** Allowlisted tool names when toolPolicy is 'allowlist'. */
+  toolAllowlist?: string[];
 }
 
 interface DisplayMessage {
@@ -44,6 +51,9 @@ interface ChatAppProps {
   sessionId: string;
   initialMessages: Message[];
   mcpManager?: McpManager;
+  enableWriteTools?: boolean;
+  toolPolicy?: string;
+  toolAllowlist?: string[];
 }
 
 function formatRole(role: string): string {
@@ -79,6 +89,9 @@ function ChatApp({
   sessionId,
   initialMessages,
   mcpManager,
+  enableWriteTools,
+  toolPolicy,
+  toolAllowlist,
 }: ChatAppProps): React.ReactElement {
   const { exit } = useApp();
 
@@ -193,11 +206,12 @@ function ChatApp({
           const memory = new WorkingMemory(provider, profile?.model, undefined);
           const cache = new ToolResultCache();
 
-          // Merge MCP tool schemas with read-only tools
+          // Select tool schemas based on mode (read-only for chat, full for go)
+          const baseSchemas = enableWriteTools ? ALL_TOOL_SCHEMAS : READ_ONLY_TOOL_SCHEMAS;
           const mcpSchemas = mcpManager?.getToolSchemas() ?? [];
           const chatToolSchemas = mcpSchemas.length > 0
-            ? [...READ_ONLY_TOOL_SCHEMAS, ...mcpSchemas]
-            : READ_ONLY_TOOL_SCHEMAS;
+            ? [...baseSchemas, ...mcpSchemas]
+            : baseSchemas;
 
           agentSystemPrompt =
             profile?.systemPrompt ??
@@ -346,12 +360,38 @@ function ChatApp({
                 }
               }
 
-              setStreamingText(ansi(ANSI.dimCyan, `▸ ${tc.name}(${Object.entries(tc.arguments).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ')})`));
+              const argsSummary = Object.entries(tc.arguments).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ');
+              const isWriteTool = enableWriteTools && !READONLY_TOOL_NAMES.has(tc.name) && !mcpManager?.isOwnTool(tc.name);
+
+              if (isWriteTool) {
+                setStreamingText(ansi(ANSI.dimYellow, `⚡ ${tc.name}(${argsSummary})`));
+              } else {
+                setStreamingText(ansi(ANSI.dimCyan, `▸ ${tc.name}(${argsSummary})`));
+              }
+
+              // Permission check for write tools
+              if (isWriteTool && toolPolicy !== 'always') {
+                if (toolPolicy === 'never') {
+                  toolMessages.push({ role: 'user', content: `[Tool result: ${tc.name}]\nDenied: write tools are disabled by tool policy.` });
+                  tracker.record(tc.name, tc.arguments, true);
+                  continue;
+                }
+                if (toolPolicy === 'allowlist' && !toolAllowlist?.includes(tc.name)) {
+                  toolMessages.push({ role: 'user', content: `[Tool result: ${tc.name}]\nDenied: tool not in allowlist.` });
+                  tracker.record(tc.name, tc.arguments, true);
+                  continue;
+                }
+                // ask_every_time: auto-approve for now (proper readline prompt would block React render)
+                // TODO: implement proper permission UI in Ink
+              }
+
               let toolOutput: string;
               let wasError = false;
               try {
                 if (mcpManager?.isOwnTool(tc.name)) {
                   toolOutput = await mcpManager.executeTool(tc.name, tc.arguments);
+                } else if (isWriteTool) {
+                  toolOutput = await executeTool(tc.name, tc.arguments, workspaceRoot);
                 } else {
                   toolOutput = await executeReadOnlyTool(tc.name, tc.arguments, workspaceRoot);
                 }
@@ -525,6 +565,9 @@ export async function startChat(options: ChatOptions): Promise<void> {
       sessionId={options.sessionId}
       initialMessages={options.initialMessages}
       mcpManager={options.mcpManager}
+      enableWriteTools={options.enableWriteTools}
+      toolPolicy={options.toolPolicy}
+      toolAllowlist={options.toolAllowlist}
     />
   );
 
