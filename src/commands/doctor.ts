@@ -6,16 +6,24 @@ import type { CliOverrides } from '../config/schema.js';
 
 const execFileAsync = promisify(execFile);
 
+type CheckStatus = 'pass' | 'warn' | 'fail';
+
+interface CheckResult {
+  status: CheckStatus;
+  description: string;
+  detail: string;
+}
+
 async function check(
   description: string,
-  fn: () => Promise<string | void>
-): Promise<{ ok: boolean; description: string; detail: string }> {
+  fn: () => Promise<{ status: CheckStatus; detail: string }>
+): Promise<CheckResult> {
   try {
-    const detail = (await fn()) ?? '';
-    return { ok: true, description, detail: String(detail) };
+    const result = await fn();
+    return { description, ...result };
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
-    return { ok: false, description, detail };
+    return { status: 'fail', description, detail };
   }
 }
 
@@ -25,18 +33,18 @@ export async function runDoctor(options: CliOverrides): Promise<void> {
   const results = await Promise.all([
     // 1. Node.js version check
     check('Node.js version >= 20', () => {
-      const version = process.version; // e.g. "v20.0.0"
+      const version = process.version;
       const major = parseInt(version.slice(1).split('.')[0] ?? '0', 10);
       if (major < 20) {
-        throw new Error(`Node.js ${version} detected — upgrade to v20 or later`);
+        return { status: 'fail' as const, detail: `Node.js ${version} detected — upgrade to v20 or later` };
       }
-      return Promise.resolve(version);
+      return { status: 'pass' as const, detail: version };
     }),
 
     // 2. Config file parse check
     check('Config file is valid', async () => {
       const config = await loadConfig(process.cwd(), options);
-      return `Active profile: "${config.defaultProfile}"`;
+      return { status: 'pass' as const, detail: `Active profile: "${config.defaultProfile}"` };
     }),
 
     // 3. Provider connectivity
@@ -45,27 +53,46 @@ export async function runDoctor(options: CliOverrides): Promise<void> {
       const profile = getActiveProfile(config);
       const adapter = await createProvider(profile);
       await adapter.validateCredentials();
-      return `Provider: ${profile.provider}`;
+      const via = profile.provider === 'copilot' && process.env['JAM_VSCODE_LM_PORT']
+        ? 'copilot (via VSCode)'
+        : profile.provider;
+      return { status: 'pass' as const, detail: `Provider: ${via}` };
     }),
 
-    // 4. ripgrep availability
+    // 4. Copilot CLI availability
+    check('Copilot CLI (@github/copilot)', async () => {
+      try {
+        const { stdout } = await execFileAsync('npx', ['@github/copilot', '--version'], { timeout: 15_000 });
+        return { status: 'pass' as const, detail: stdout.trim() };
+      } catch {
+        return {
+          status: 'warn' as const,
+          detail: 'Not installed — tool calling disabled for copilot provider. Install: npm install -g @github/copilot',
+        };
+      }
+    }),
+
+    // 5. ripgrep availability (optional)
     check('ripgrep (rg) is available', async () => {
-      const { stdout } = await execFileAsync('rg', ['--version'], { timeout: 5000 });
-      const firstLine = stdout.split('\n')[0]?.trim() ?? 'rg';
-      return firstLine;
+      try {
+        const { stdout } = await execFileAsync('rg', ['--version'], { timeout: 5000 });
+        const firstLine = stdout.split('\n')[0]?.trim() ?? 'rg';
+        return { status: 'pass' as const, detail: firstLine };
+      } catch {
+        return { status: 'warn' as const, detail: 'Not installed — using JavaScript-based search (slower)' };
+      }
     }),
 
-    // 5. Keytar availability
-    check('keytar is available (secure credential storage)', async () => {
+    // 6. Keytar availability (optional)
+    check('keytar (secure credential storage)', async () => {
       try {
         await import('keytar');
-        return 'keytar loaded successfully';
-      } catch (err) {
-        throw new Error(
-          `keytar not available — falling back to environment variables. (${
-            err instanceof Error ? err.message : String(err)
-          })`
-        );
+        return { status: 'pass' as const, detail: 'loaded' };
+      } catch {
+        return {
+          status: 'warn' as const,
+          detail: 'Not available — API keys must be provided via environment variables or config',
+        };
       }
     }),
   ]);
@@ -74,45 +101,34 @@ export async function runDoctor(options: CliOverrides): Promise<void> {
   process.stdout.write(chalk.dim('─'.repeat(60) + '\n\n'));
 
   for (const result of results) {
-    const icon = result.ok ? chalk.green('[✓]') : chalk.red('[✗]');
-    const label = result.ok ? chalk.green(result.description) : chalk.red(result.description);
+    let icon: string;
+    let label: string;
+    if (result.status === 'pass') {
+      icon = chalk.green('[✓]');
+      label = chalk.green(result.description);
+    } else if (result.status === 'warn') {
+      icon = chalk.yellow('[!]');
+      label = chalk.yellow(result.description);
+    } else {
+      icon = chalk.red('[✗]');
+      label = chalk.red(result.description);
+    }
     const detail = result.detail ? chalk.dim(` — ${result.detail}`) : '';
     process.stdout.write(`${icon} ${label}${detail}\n`);
   }
 
   process.stdout.write('\n');
 
-  const failCount = results.filter((r) => !r.ok).length;
-  if (failCount === 0) {
+  const failCount = results.filter((r) => r.status === 'fail').length;
+  const warnCount = results.filter((r) => r.status === 'warn').length;
+
+  if (failCount === 0 && warnCount === 0) {
     process.stdout.write(chalk.green('All checks passed.\n'));
+  } else if (failCount === 0) {
+    process.stdout.write(chalk.green(`All checks passed (${warnCount} optional).\n`));
   } else {
     process.stdout.write(
-      chalk.yellow(`${failCount} check${failCount === 1 ? '' : 's'} failed or degraded.\n`)
+      chalk.yellow(`${failCount} check${failCount === 1 ? '' : 's'} failed, ${warnCount} optional.\n`)
     );
-
-    // Additional guidance for known failures
-    const rgFailed = results.find(
-      (r) => r.description.includes('ripgrep') && !r.ok
-    );
-    if (rgFailed) {
-      process.stdout.write(
-        chalk.dim(
-          '\nNote: ripgrep is optional — Jam will fall back to a JavaScript-based search.\n' +
-            'Install ripgrep for faster search: https://github.com/BurntSushi/ripgrep#installation\n'
-        )
-      );
-    }
-
-    const keytarFailed = results.find(
-      (r) => r.description.includes('keytar') && !r.ok
-    );
-    if (keytarFailed) {
-      process.stdout.write(
-        chalk.dim(
-          '\nNote: Without keytar, API keys must be provided via environment variables.\n' +
-            'Example: JAM_API_KEY=<your-key> jam ask "hello"\n'
-        )
-      );
-    }
   }
 }

@@ -24,6 +24,7 @@ interface CopilotAdapterOptions {
  */
 export class CopilotAdapter implements ProviderAdapter {
   private backend: ProviderAdapter | null = null;
+  private initPromise: Promise<void> | null = null;
   private readonly options: CopilotAdapterOptions;
 
   constructor(options: CopilotAdapterOptions = {}) {
@@ -33,6 +34,18 @@ export class CopilotAdapter implements ProviderAdapter {
   get info(): ProviderInfo {
     if (this.backend) return this.backend.info;
     return { name: 'copilot', supportsStreaming: true, supportsTools: false };
+  }
+
+  /**
+   * Lazily initialize the backend on first use.
+   * Safe to call multiple times — only runs once.
+   */
+  private async ensureBackend(): Promise<void> {
+    if (this.backend) return;
+    if (!this.initPromise) {
+      this.initPromise = this.validateCredentials();
+    }
+    await this.initPromise;
   }
 
   async validateCredentials(): Promise<void> {
@@ -87,8 +100,8 @@ export class CopilotAdapter implements ProviderAdapter {
   }
 
   async *streamCompletion(request: CompletionRequest): AsyncIterable<StreamChunk> {
-    if (!this.backend) throw new JamError('Not connected. Call validateCredentials() first.', 'PROVIDER_UNAVAILABLE');
-    yield* this.backend.streamCompletion(request);
+    await this.ensureBackend();
+    yield* this.backend!.streamCompletion(request);
   }
 
   async chatWithTools(
@@ -96,19 +109,19 @@ export class CopilotAdapter implements ProviderAdapter {
     tools: ToolDefinition[],
     options?: { model?: string; temperature?: number; maxTokens?: number; systemPrompt?: string }
   ): Promise<ChatWithToolsResponse> {
-    if (!this.backend) throw new JamError('Not connected.', 'PROVIDER_UNAVAILABLE');
-    if (!this.backend.info.supportsTools) {
+    await this.ensureBackend();
+    if (!this.backend!.info.supportsTools) {
       throw new JamError(
         'Copilot proxy backend does not support tool calling. Install @github/copilot CLI for full support.',
         'PROVIDER_UNAVAILABLE'
       );
     }
-    return this.backend.chatWithTools!(messages, tools, options);
+    return this.backend!.chatWithTools!(messages, tools, options);
   }
 
   async listModels(): Promise<string[]> {
-    if (!this.backend) throw new JamError('Not connected.', 'PROVIDER_UNAVAILABLE');
-    return this.backend.listModels();
+    await this.ensureBackend();
+    return this.backend!.listModels();
   }
 
   dispose(): void {
