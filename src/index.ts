@@ -854,6 +854,64 @@ async function loadPlugins(): Promise<void> {
   }
 }
 
+// ── git ─────────────────────────────────────────────────────────────────
+const gitCmd = program
+  .command('git')
+  .description('Git productivity toolkit — status explained, smart undo, cleanup, standup');
+
+gitCmd
+  .command('wtf')
+  .description('Explain the current git state in plain English')
+  .action(async () => {
+    const { runGitWtf } = await import('./commands/git-tools.js');
+    runGitWtf();
+  });
+
+gitCmd
+  .command('undo')
+  .description('Detect and suggest how to undo the last git operation')
+  .option('--dry', 'preview only, do not execute')
+  .action(async (cmdOpts: Record<string, unknown>) => {
+    const { runGitUndo } = await import('./commands/git-tools.js');
+    runGitUndo({ dryRun: cmdOpts['dry'] as boolean | undefined });
+  });
+
+gitCmd
+  .command('cleanup')
+  .description('Remove merged branches, prune stale remotes')
+  .option('--dry', 'preview only, do not delete')
+  .option('--json', 'output as JSON')
+  .action(async (cmdOpts: Record<string, unknown>) => {
+    const { runGitCleanup } = await import('./commands/git-tools.js');
+    runGitCleanup({
+      dryRun: cmdOpts['dry'] as boolean | undefined,
+      json: cmdOpts['json'] as boolean | undefined,
+    });
+  });
+
+gitCmd
+  .command('standup')
+  .description('Show your recent commits across all branches')
+  .option('--days <n>', 'number of days to look back (default: 1)', '1')
+  .option('--author <name>', 'filter by author (default: you)')
+  .option('--json', 'output as JSON')
+  .action(async (cmdOpts: Record<string, unknown>) => {
+    const { runGitStandup } = await import('./commands/git-tools.js');
+    runGitStandup({
+      days: parseInt(cmdOpts['days'] as string) || 1,
+      author: cmdOpts['author'] as string | undefined,
+      json: cmdOpts['json'] as boolean | undefined,
+    });
+  });
+
+gitCmd
+  .command('oops')
+  .description('Quick reference for common git mistakes and their fixes')
+  .action(async () => {
+    const { runGitOops } = await import('./commands/git-tools.js');
+    runGitOops();
+  });
+
 // ── vibes (hidden easter egg) ────────────────────────────────────────────
 program
   .command('vibes', { hidden: true })
