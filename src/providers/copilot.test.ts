@@ -132,4 +132,19 @@ describe('CopilotAdapter', () => {
       for await (const _chunk of iter) { /* consume */ }
     }).rejects.toMatchObject({ code: 'PROVIDER_STREAM_ERROR' });
   });
+
+  it('factory throws PROVIDER_UNAVAILABLE when JAM_VSCODE_LM_PORT is not set', async () => {
+    const saved = process.env['JAM_VSCODE_LM_PORT'];
+    delete process.env['JAM_VSCODE_LM_PORT'];
+    try {
+      const { createProvider } = await import('./factory.js');
+      await expect(
+        createProvider({ provider: 'copilot' })
+      ).rejects.toMatchObject({ code: 'PROVIDER_UNAVAILABLE' });
+    } finally {
+      if (saved !== undefined) {
+        process.env['JAM_VSCODE_LM_PORT'] = saved;
+      }
+    }
+  });
 });

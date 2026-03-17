@@ -98,8 +98,25 @@ export async function createProvider(profile: Profile): Promise<ProviderAdapter>
     });
   }
 
+  if (provider === 'copilot') {
+    const port = process.env['JAM_VSCODE_LM_PORT'];
+    if (!port) {
+      throw new JamError(
+        'Copilot provider requires VSCode. Open a terminal in VSCode with the Jam extension installed.',
+        'PROVIDER_UNAVAILABLE'
+      );
+    }
+    const { CopilotAdapter } = await import('./copilot.js');
+    return new CopilotAdapter({
+      baseUrl: `http://127.0.0.1:${port}`,
+      model: profile.model,
+      requestTimeoutMs: profile.requestTimeoutMs,
+      tlsCaPath: profile.tlsCaPath,
+    });
+  }
+
   throw new JamError(
-    `Unknown provider: "${provider}". Supported providers: ollama, openai, anthropic, groq, embedded`,
+    `Unknown provider: "${provider}". Supported providers: ollama, openai, anthropic, groq, embedded, copilot`,
     'CONFIG_INVALID'
   );
 }
