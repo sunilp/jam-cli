@@ -92,9 +92,9 @@ export class OpenAIAdapter implements ProviderAdapter {
     supportsStreaming: true,
   };
 
-  private readonly baseUrl: string;
-  private readonly model: string;
-  private readonly apiKey: string | undefined;
+  protected readonly baseUrl: string;
+  protected readonly model: string;
+  protected readonly apiKey: string | undefined;
   protected readonly fetchOptions: FetchOptions;
 
   constructor(options: { baseUrl?: string; model?: string; apiKey?: string; requestTimeoutMs?: number; tlsCaPath?: string } = {}) {
@@ -107,7 +107,7 @@ export class OpenAIAdapter implements ProviderAdapter {
     };
   }
 
-  private authHeaders(): Record<string, string> {
+  protected authHeaders(): Record<string, string> {
     if (!this.apiKey) {
       throw new JamError(
         'No OpenAI API key found. Set OPENAI_API_KEY environment variable or configure apiKey in your profile.',
