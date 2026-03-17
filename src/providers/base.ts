@@ -80,4 +80,6 @@ export interface ProviderAdapter {
     tools: ToolDefinition[],
     options?: Pick<CompletionRequest, 'model' | 'temperature' | 'maxTokens' | 'systemPrompt'>
   ): Promise<ChatWithToolsResponse>;
+  /** Optional cleanup — called when the adapter is no longer needed. */
+  dispose?(): void;
 }

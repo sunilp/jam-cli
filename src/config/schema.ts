@@ -105,6 +105,8 @@ export const JamConfigSchema = z.object({
   enabledPlugins: z.array(z.string()).optional(),
   /** Never load these plugins (denylist by name). */
   disabledPlugins: z.array(z.string()).optional(),
+  /** Whether to prompt for @github/copilot CLI installation when not found (default: true). */
+  copilotAutoInstall: z.boolean().default(true),
 });
 export type JamConfig = z.infer<typeof JamConfigSchema>;
 

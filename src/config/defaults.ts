@@ -16,4 +16,5 @@ export const CONFIG_DEFAULTS: JamConfig = {
   redactPatterns: [],
   cacheEnabled: true,
   cacheTtlSeconds: 3600,
+  copilotAutoInstall: true,
 };
