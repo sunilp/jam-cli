@@ -100,7 +100,7 @@ export class CopilotSdkBackend implements ProviderAdapter {
         clientOptions['useLoggedInUser'] = true;
       }
 
-      this.client = new CopilotClient(clientOptions as CopilotClientOptions) as CopilotClientLike;
+      this.client = new CopilotClient(clientOptions as CopilotClientOptions) as unknown as CopilotClientLike;
 
       await this.client.start();
       await this.client.ping('jam-cli');
