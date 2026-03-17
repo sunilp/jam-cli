@@ -170,6 +170,35 @@ export async function loadConfig(
     config = { ...config, defaultProfile: profileName };
   }
 
+  // Auto-detect Copilot provider from VSCode terminal env var.
+  // Only activate when no explicit provider has been configured anywhere.
+  if (process.env['JAM_VSCODE_LM_PORT']) {
+    const activeProfileName = config.defaultProfile;
+    const activeProfile = config.profiles[activeProfileName];
+    if (activeProfile && activeProfile.provider === 'ollama') {
+      // Check if provider was explicitly set by user (config file or CLI),
+      // vs just being the default. If CLI overrides set a provider, it was
+      // already applied above. If a config file set it, the merge would have
+      // changed it from the default. So if it's still 'ollama' and no
+      // cliOverrides.provider was passed, it's the untouched default.
+      const providerExplicitlySet =
+        cliOverrides.provider !== undefined ||
+        (repoConfig.profiles?.[activeProfileName] as Record<string, unknown> | undefined)?.provider !== undefined ||
+        (dotJamConfig.profiles?.[activeProfileName] as Record<string, unknown> | undefined)?.provider !== undefined ||
+        (xdgConfig.profiles?.[activeProfileName] as Record<string, unknown> | undefined)?.provider !== undefined;
+
+      if (!providerExplicitlySet) {
+        config = {
+          ...config,
+          profiles: {
+            ...config.profiles,
+            [activeProfileName]: { ...activeProfile, provider: 'copilot' },
+          },
+        };
+      }
+    }
+  }
+
   return config;
 }
 

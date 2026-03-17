@@ -93,6 +93,58 @@ describe('loadConfig', () => {
     const config = await loadConfig(tmpDir, { model: 'claude-sonnet-4-20250514', provider: 'openai' });
     expect(config.profiles['default']?.provider).toBe('openai');
   });
+
+  it('auto-selects copilot provider when JAM_VSCODE_LM_PORT is set and no explicit provider', async () => {
+    const saved = process.env['JAM_VSCODE_LM_PORT'];
+    process.env['JAM_VSCODE_LM_PORT'] = '12345';
+    try {
+      const config = await loadConfig(tmpDir);
+      expect(config.profiles['default']?.provider).toBe('copilot');
+    } finally {
+      if (saved !== undefined) {
+        process.env['JAM_VSCODE_LM_PORT'] = saved;
+      } else {
+        delete process.env['JAM_VSCODE_LM_PORT'];
+      }
+    }
+  });
+
+  it('does not override explicit provider config when JAM_VSCODE_LM_PORT is set', async () => {
+    const saved = process.env['JAM_VSCODE_LM_PORT'];
+    process.env['JAM_VSCODE_LM_PORT'] = '12345';
+    try {
+      const repoConfig = {
+        profiles: {
+          default: { provider: 'anthropic', apiKey: 'sk-test' },
+        },
+      };
+      writeFileSync(join(tmpDir, '.jamrc'), JSON.stringify(repoConfig));
+
+      const config = await loadConfig(tmpDir);
+      expect(config.profiles['default']?.provider).toBe('anthropic');
+    } finally {
+      if (saved !== undefined) {
+        process.env['JAM_VSCODE_LM_PORT'] = saved;
+      } else {
+        delete process.env['JAM_VSCODE_LM_PORT'];
+      }
+    }
+  });
+
+  it('does not override --provider CLI flag when JAM_VSCODE_LM_PORT is set', async () => {
+    const saved = process.env['JAM_VSCODE_LM_PORT'];
+    process.env['JAM_VSCODE_LM_PORT'] = '12345';
+    try {
+      const config = await loadConfig(tmpDir, { provider: 'openai' });
+      expect(config.profiles['default']?.provider).toBe('openai');
+    } finally {
+      if (saved !== undefined) {
+        process.env['JAM_VSCODE_LM_PORT'] = saved;
+      } else {
+        delete process.env['JAM_VSCODE_LM_PORT'];
+      }
+    }
+  });
 });
 
 describe('getActiveProfile', () => {
