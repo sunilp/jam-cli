@@ -854,6 +854,14 @@ async function loadPlugins(): Promise<void> {
   }
 }
 
+// ── vibes (hidden easter egg) ────────────────────────────────────────────
+program
+  .command('vibes', { hidden: true })
+  .action(async () => {
+    const { runVibes } = await import('./commands/vibes.js');
+    await runVibes();
+  });
+
 // ── Default action (no subcommand): print banner then help ──────────────────
 if (process.argv.slice(2).length === 0) {
   const noColor = process.argv.includes('--no-color');
