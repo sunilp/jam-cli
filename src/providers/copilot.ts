@@ -1,71 +1,120 @@
-import type { ProviderInfo } from './base.js';
-import { OpenAIAdapter } from './openai.js';
+import type {
+  ProviderAdapter,
+  ProviderInfo,
+  CompletionRequest,
+  StreamChunk,
+  Message,
+  ToolDefinition,
+  ChatWithToolsResponse,
+} from './base.js';
 import { JamError } from '../utils/errors.js';
-import { proxyFetch } from '../utils/fetch.js';
+
+interface CopilotAdapterOptions {
+  apiKey?: string;
+  model?: string;
+  baseUrl?: string;
+  requestTimeoutMs?: number;
+  tlsCaPath?: string;
+}
 
 /**
- * Copilot LM provider adapter.
- * Connects to the local HTTP proxy server started by the jam-vscode extension,
- * which bridges vscode.lm (Copilot) as an OpenAI-compatible endpoint.
- *
- * Auto-activated when JAM_VSCODE_LM_PORT env var is set.
+ * Smart Copilot provider that dispatches to the best available backend:
+ * 1. CopilotSdkBackend — full tool calling via @github/copilot-sdk
+ * 2. CopilotProxyBackend — VSCode proxy fallback (no tool calling)
  */
-export class CopilotAdapter extends OpenAIAdapter {
-  override readonly info: ProviderInfo = {
-    name: 'copilot',
-    supportsStreaming: true,
-    supportsTools: false,
-  };
+export class CopilotAdapter implements ProviderAdapter {
+  private backend: ProviderAdapter | null = null;
+  private readonly options: CopilotAdapterOptions;
 
-  constructor(options: { baseUrl: string; model?: string; requestTimeoutMs?: number; tlsCaPath?: string }) {
-    super({
-      baseUrl: options.baseUrl,
-      model: options.model ?? 'copilot',
-      apiKey: 'unused', // Prevent parent constructor from reading OPENAI_API_KEY
-      requestTimeoutMs: options.requestTimeoutMs,
-      tlsCaPath: options.tlsCaPath,
-    });
+  constructor(options: CopilotAdapterOptions = {}) {
+    this.options = options;
   }
 
-  protected override authHeaders(): Record<string, string> {
-    return { 'Content-Type': 'application/json' };
+  get info(): ProviderInfo {
+    if (this.backend) return this.backend.info;
+    return { name: 'copilot', supportsStreaming: true, supportsTools: false };
   }
 
-  override async validateCredentials(): Promise<void> {
+  async validateCredentials(): Promise<void> {
+    // Try SDK backend first
     try {
-      const response = await proxyFetch(`${this.baseUrl}/health`, {}, this.fetchOptions);
-      if (!response.ok) {
-        throw new Error(`Health check returned ${response.status}`);
+      const { isCopilotCliAvailable, CopilotSdkBackend } = await import('./copilot-sdk-backend.js');
+      if (await isCopilotCliAvailable()) {
+        const sdk = new CopilotSdkBackend({
+          apiKey: this.options.apiKey,
+          model: this.options.model,
+          requestTimeoutMs: this.options.requestTimeoutMs,
+        });
+
+        await sdk.validateCredentials();
+        this.backend = sdk;
+        return;
       }
-    } catch (err) {
-      if (err instanceof JamError) throw err;
+    } catch {
+      // SDK failed, fall through to proxy
+    }
+
+    // Try proxy backend
+    const port = process.env['JAM_VSCODE_LM_PORT'];
+    const baseUrl = this.options.baseUrl ?? (port ? `http://127.0.0.1:${port}` : undefined);
+
+    if (baseUrl) {
+      try {
+        const { CopilotProxyBackend } = await import('./copilot-proxy-backend.js');
+        const proxy = new CopilotProxyBackend({
+          baseUrl,
+          model: this.options.model,
+          requestTimeoutMs: this.options.requestTimeoutMs,
+          tlsCaPath: this.options.tlsCaPath,
+        });
+
+        await proxy.validateCredentials();
+        this.backend = proxy;
+        return;
+      } catch {
+        // Proxy also failed
+      }
+    }
+
+    // Neither backend available
+    throw new JamError(
+      'Copilot provider not available.\n' +
+      '  Option 1: Install Copilot CLI: npm install -g @github/copilot\n' +
+      '  Option 2: Open a terminal in VSCode with the Jam extension installed.\n' +
+      '  Option 3: Use a different provider: --provider ollama',
+      'PROVIDER_UNAVAILABLE'
+    );
+  }
+
+  async *streamCompletion(request: CompletionRequest): AsyncIterable<StreamChunk> {
+    if (!this.backend) throw new JamError('Not connected. Call validateCredentials() first.', 'PROVIDER_UNAVAILABLE');
+    yield* this.backend.streamCompletion(request);
+  }
+
+  async chatWithTools(
+    messages: Message[],
+    tools: ToolDefinition[],
+    options?: { model?: string; temperature?: number; maxTokens?: number; systemPrompt?: string }
+  ): Promise<ChatWithToolsResponse> {
+    if (!this.backend) throw new JamError('Not connected.', 'PROVIDER_UNAVAILABLE');
+    if (!this.backend.info.supportsTools) {
       throw new JamError(
-        'Copilot LM server not reachable. Open a new terminal in VSCode or use --provider ollama',
-        'PROVIDER_UNAVAILABLE',
-        { retryable: false, cause: err }
+        'Copilot proxy backend does not support tool calling. Install @github/copilot CLI for full support.',
+        'PROVIDER_UNAVAILABLE'
       );
     }
+    return this.backend.chatWithTools!(messages, tools, options);
   }
 
-  override async listModels(): Promise<string[]> {
-    try {
-      const response = await proxyFetch(`${this.baseUrl}/v1/models`, {
-        headers: this.authHeaders(),
-      }, { ...this.fetchOptions, timeoutMs: this.fetchOptions.timeoutMs ?? 10_000 });
+  async listModels(): Promise<string[]> {
+    if (!this.backend) throw new JamError('Not connected.', 'PROVIDER_UNAVAILABLE');
+    return this.backend.listModels();
+  }
 
-      if (!response.ok) {
-        throw new Error(`Models endpoint returned ${response.status}`);
-      }
-
-      const data = (await response.json()) as { data: Array<{ id: string }> };
-      return (data.data ?? []).map((m) => m.id).sort();
-    } catch (err) {
-      if (err instanceof JamError) throw err;
-      throw new JamError(
-        'Copilot LM server not reachable. Open a new terminal in VSCode or use --provider ollama',
-        'PROVIDER_UNAVAILABLE',
-        { retryable: false, cause: err }
-      );
+  dispose(): void {
+    if (this.backend && typeof (this.backend as any).dispose === 'function') {
+      (this.backend as any).dispose();
     }
+    this.backend = null;
   }
 }

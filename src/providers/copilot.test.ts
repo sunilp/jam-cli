@@ -1,9 +1,17 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
-import { CopilotAdapter } from './copilot.js';
 
-const PORT = '19876';
+// Mock the SDK availability check to return false (no CLI installed)
+vi.mock('./copilot-sdk-backend.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./copilot-sdk-backend.js')>();
+  return {
+    ...actual,
+    isCopilotCliAvailable: vi.fn().mockResolvedValue(false),
+  };
+});
+
+const PORT = '19879';
 const BASE_URL = `http://127.0.0.1:${PORT}`;
 
 function makeSSEStream(events: object[]): ReadableStream<Uint8Array> {
@@ -25,126 +33,69 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
-describe('CopilotAdapter', () => {
-  it('has correct provider info', () => {
+describe('CopilotAdapter dispatcher', () => {
+  it('falls back to proxy when SDK CLI not available', async () => {
+    server.use(
+      http.get(`${BASE_URL}/health`, () => HttpResponse.json({ status: 'ok' }))
+    );
+
+    const { CopilotAdapter } = await import('./copilot.js');
     const adapter = new CopilotAdapter({ baseUrl: BASE_URL });
-    expect(adapter.info.name).toBe('copilot');
-    expect(adapter.info.supportsStreaming).toBe(true);
+    await adapter.validateCredentials();
     expect(adapter.info.supportsTools).toBe(false);
   });
 
-  it('validates credentials via /health endpoint', async () => {
+  it('streams via proxy backend', async () => {
     server.use(
-      http.get(`${BASE_URL}/health`, () => {
-        return HttpResponse.json({ status: 'ok' });
+      http.get(`${BASE_URL}/health`, () => HttpResponse.json({ status: 'ok' })),
+      http.post(`${BASE_URL}/v1/chat/completions`, () => {
+        const stream = makeSSEStream([
+          { id: 'c', choices: [{ delta: { content: 'Hi' }, finish_reason: null }] },
+          { id: 'c', choices: [{ delta: {}, finish_reason: 'stop' }] },
+        ]);
+        return new HttpResponse(stream, { headers: { 'Content-Type': 'text/event-stream' } });
       })
     );
 
+    const { CopilotAdapter } = await import('./copilot.js');
     const adapter = new CopilotAdapter({ baseUrl: BASE_URL });
-    await expect(adapter.validateCredentials()).resolves.toBeUndefined();
+    await adapter.validateCredentials();
+
+    const chunks = [];
+    for await (const chunk of adapter.streamCompletion({ messages: [{ role: 'user', content: 'Hi' }] })) {
+      chunks.push(chunk);
+    }
+    expect(chunks.filter((c) => !c.done).map((c) => c.delta).join('')).toBe('Hi');
   });
 
-  it('throws PROVIDER_UNAVAILABLE when health check fails', async () => {
-    server.use(
-      http.get(`${BASE_URL}/health`, () => {
-        return HttpResponse.error();
-      })
-    );
-
-    const adapter = new CopilotAdapter({ baseUrl: BASE_URL });
+  it('throws PROVIDER_UNAVAILABLE when neither backend available', async () => {
+    const { CopilotAdapter } = await import('./copilot.js');
+    const adapter = new CopilotAdapter({});
     await expect(adapter.validateCredentials()).rejects.toMatchObject({
       code: 'PROVIDER_UNAVAILABLE',
     });
   });
 
-  it('streams completions without auth header', async () => {
-    let capturedHeaders: Headers | undefined;
-
+  it('throws when chatWithTools called on proxy backend', async () => {
     server.use(
-      http.post(`${BASE_URL}/v1/chat/completions`, ({ request }) => {
-        capturedHeaders = request.headers;
-        const stream = makeSSEStream([
-          {
-            id: 'chatcmpl-copilot',
-            choices: [{ delta: { content: 'Hello' }, finish_reason: null }],
-          },
-          {
-            id: 'chatcmpl-copilot',
-            choices: [{ delta: { content: ' world' }, finish_reason: null }],
-          },
-          {
-            id: 'chatcmpl-copilot',
-            choices: [{ delta: {}, finish_reason: 'stop' }],
-          },
-        ]);
-        return new HttpResponse(stream, {
-          headers: { 'Content-Type': 'text/event-stream' },
-        });
-      })
+      http.get(`${BASE_URL}/health`, () => HttpResponse.json({ status: 'ok' }))
     );
 
+    const { CopilotAdapter } = await import('./copilot.js');
     const adapter = new CopilotAdapter({ baseUrl: BASE_URL });
-    const chunks = [];
-    for await (const chunk of adapter.streamCompletion({
-      messages: [{ role: 'user', content: 'Hi' }],
-    })) {
-      chunks.push(chunk);
-    }
+    await adapter.validateCredentials();
 
-    const textChunks = chunks.filter((c) => !c.done);
-    expect(textChunks.map((c) => c.delta).join('')).toBe('Hello world');
-
-    // Verify no Authorization header was sent
-    expect(capturedHeaders?.get('authorization')).toBeNull();
-    expect(capturedHeaders?.get('content-type')).toBe('application/json');
+    await expect(
+      adapter.chatWithTools(
+        [{ role: 'user', content: 'test' }],
+        [{ name: 'test', description: 'test', parameters: { type: 'object', properties: {}, required: [] } }]
+      )
+    ).rejects.toMatchObject({ code: 'PROVIDER_UNAVAILABLE' });
   });
 
-  it('lists models from proxy server', async () => {
-    server.use(
-      http.get(`${BASE_URL}/v1/models`, () => {
-        return HttpResponse.json({
-          data: [
-            { id: 'copilot-gpt-4o' },
-            { id: 'copilot-claude-3.5-sonnet' },
-          ],
-        });
-      })
-    );
-
-    const adapter = new CopilotAdapter({ baseUrl: BASE_URL });
-    const models = await adapter.listModels();
-    expect(models).toEqual(['copilot-claude-3.5-sonnet', 'copilot-gpt-4o']);
-  });
-
-  it('throws PROVIDER_STREAM_ERROR when server returns 503', async () => {
-    server.use(
-      http.post(`${BASE_URL}/v1/chat/completions`, () => {
-        return new HttpResponse('No Copilot model available', { status: 503 });
-      })
-    );
-
-    const adapter = new CopilotAdapter({ baseUrl: BASE_URL });
-    const iter = adapter.streamCompletion({
-      messages: [{ role: 'user', content: 'Hi' }],
-    });
-
-    await expect(async () => {
-      for await (const _chunk of iter) { /* consume */ }
-    }).rejects.toMatchObject({ code: 'PROVIDER_STREAM_ERROR' });
-  });
-
-  it('factory throws PROVIDER_UNAVAILABLE when JAM_VSCODE_LM_PORT is not set', async () => {
-    const saved = process.env['JAM_VSCODE_LM_PORT'];
-    delete process.env['JAM_VSCODE_LM_PORT'];
-    try {
-      const { createProvider } = await import('./factory.js');
-      await expect(
-        createProvider({ provider: 'copilot' })
-      ).rejects.toMatchObject({ code: 'PROVIDER_UNAVAILABLE' });
-    } finally {
-      if (saved !== undefined) {
-        process.env['JAM_VSCODE_LM_PORT'] = saved;
-      }
-    }
+  it('dispose is safe when no backend', async () => {
+    const { CopilotAdapter } = await import('./copilot.js');
+    const adapter = new CopilotAdapter({});
+    expect(() => adapter.dispose()).not.toThrow();
   });
 });
