@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
+import type * as CopilotSdkBackendModule from './copilot-sdk-backend.js';
 
 // Mock the SDK availability check to return false (no CLI installed)
-vi.mock('./copilot-sdk-backend.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./copilot-sdk-backend.js')>();
+vi.mock('./copilot-sdk-backend.js', async () => {
+  const actual = await vi.importActual<typeof CopilotSdkBackendModule>('./copilot-sdk-backend.js');
   return {
     ...actual,
     isCopilotCliAvailable: vi.fn().mockResolvedValue(false),

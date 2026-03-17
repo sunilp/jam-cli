@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import type { CopilotClientOptions } from '@github/copilot-sdk';
 import type {
   ProviderAdapter,
   ProviderInfo,
@@ -12,6 +13,26 @@ import type {
 import { JamError } from '../utils/errors.js';
 
 const execFileAsync = promisify(execFile);
+
+// Local interface types matching the subset of @github/copilot-sdk we use.
+// Avoids strict-mode lint errors from the SDK's broad types.
+interface CopilotClientLike {
+  start(): Promise<void>;
+  stop(): Promise<unknown>;
+  ping(message: string): Promise<unknown>;
+  createSession(config: Record<string, unknown>): Promise<CopilotSessionLike>;
+  listModels(): Promise<Array<{ id: string; name?: string }>>;
+}
+
+interface CopilotSessionLike {
+  send(options: { prompt: string }): void;
+  sendAndWait(
+    options: { prompt: string },
+    timeout?: number
+  ): Promise<{ data?: { content?: string } } | undefined>;
+  disconnect(): Promise<void>;
+  on(event: string, handler: (event: Record<string, unknown>) => void): void;
+}
 
 /**
  * Resolve a GitHub token for Copilot SDK authentication.
@@ -57,7 +78,7 @@ export class CopilotSdkBackend implements ProviderAdapter {
     supportsTools: true,
   };
 
-  private client: any = null;
+  private client: CopilotClientLike | null = null;
   private readonly options: SdkBackendOptions;
 
   constructor(options: SdkBackendOptions = {}) {
@@ -79,7 +100,7 @@ export class CopilotSdkBackend implements ProviderAdapter {
         clientOptions['useLoggedInUser'] = true;
       }
 
-      this.client = new CopilotClient(clientOptions as any);
+      this.client = new CopilotClient(clientOptions as CopilotClientOptions) as CopilotClientLike;
 
       await this.client.start();
       await this.client.ping('jam-cli');
@@ -141,8 +162,9 @@ export class CopilotSdkBackend implements ProviderAdapter {
       return new Promise<void>((r) => { resolve = r; });
     }
 
-    session.on('assistant.message_delta', (event: any) => {
-      const content = event?.data?.deltaContent ?? '';
+    session.on('assistant.message_delta', (event: Record<string, unknown>) => {
+      const data = event['data'] as Record<string, unknown> | undefined;
+      const content = typeof data?.['deltaContent'] === 'string' ? data['deltaContent'] : '';
       if (content) {
         enqueue({ delta: content, done: false });
       }
@@ -242,7 +264,7 @@ export class CopilotSdkBackend implements ProviderAdapter {
 
     try {
       const models = await this.client.listModels();
-      return (models ?? []).map((m: any) => m.id ?? m.name).filter(Boolean).sort();
+      return (models ?? []).map((m) => m.id ?? m.name).filter(Boolean).sort();
     } catch (err) {
       throw new JamError(
         'Failed to list Copilot models.',

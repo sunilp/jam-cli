@@ -112,8 +112,8 @@ export class CopilotAdapter implements ProviderAdapter {
   }
 
   dispose(): void {
-    if (this.backend && typeof (this.backend as any).dispose === 'function') {
-      (this.backend as any).dispose();
+    if (this.backend?.dispose) {
+      this.backend.dispose();
     }
     this.backend = null;
   }
