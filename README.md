@@ -37,21 +37,17 @@ Ask questions · Trace call graphs · Review diffs · Generate patches · Run ag
 
 ---
 
-> ### What's New in v0.6.0
+> ### What's New in v0.7.0
 >
-> **Plugin system** — Extend Jam with custom commands. Drop a plugin into `~/.jam/plugins/` with a `jam-plugin.json` manifest and an `index.js` entry point. Supports enable/disable lists, project-level plugins, and conflict detection. [Full docs](docs/plugins.md)
+> **`jam git` toolkit** — 5 zero-LLM git productivity commands. `jam git wtf` explains repo state in plain English (detached HEAD? mid-rebase? diverged?), `jam git undo` detects your last operation and shows the safe undo, `jam git cleanup` prunes merged/stale branches, `jam git standup` shows your commits across all branches, `jam git oops` is a quick-reference for 10 common git mistakes.
 >
-> **`jam diagram`** — Generate Mermaid architecture diagrams from your codebase. Static analysis maps modules, dependencies, symbols, and cycles. AI refinement optional. Supports architecture, deps, class, and flow diagram types. [Full docs](docs/diagram.md)
+> **Enterprise ready** — HTTP proxy support (`HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`), custom CA certificates (`tlsCaPath`), configurable request timeouts (`requestTimeoutMs`). Works behind corporate firewalls and SSL-inspecting proxies.
 >
-> **`jam md2pdf`** — Convert Markdown files to PDF with three style presets (default, minimal, academic). Supports headings, code blocks, tables, lists, links, and more.
+> **Security hardening** — Path traversal protection in all file tools (read, write, list), symlink escape detection, API key redaction in logs, MCP tool schema validation, npm vulnerability fixes.
 >
-> **19 zero-LLM developer utilities** — `jam todo`, `jam ports`, `jam recent`, `jam stats`, `jam hash`, `jam env`, `jam deps`, `jam dup`, `jam json`, `jam convert`, `jam pack`, `jam http`, `jam md2pdf`, `jam diagram --no-ai`. [Full docs](docs/utilities.md)
+> **Embedded provider graduated** — No longer experimental. Smart guardrails block complex commands (diff, review, commit, run, patch, verify) with helpful "use a bigger model" messages. Simple Q&A and explanations work great.
 >
-> **`jam git` toolkit** — `jam git wtf` explains repo state in plain English, `jam git undo` reverses mistakes, `jam git cleanup` prunes branches, `jam git standup` shows your work, `jam git oops` fixes common errors.
->
-> **Enterprise ready** — HTTP proxy support (`HTTP_PROXY`/`HTTPS_PROXY`), custom CA certificates (`tlsCaPath`), configurable request timeouts (`requestTimeoutMs`). Works behind corporate firewalls.
->
-> **Embedded provider graduated** — No longer experimental. Smart guardrails block complex commands (diff, review, commit) with helpful "use a bigger model" messages.
+> **19 zero-LLM utilities** — All the v0.6 utilities plus the git toolkit. [Full docs](docs/utilities.md)
 
 ---
 
