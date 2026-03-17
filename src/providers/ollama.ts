@@ -1,5 +1,7 @@
 import type { ProviderAdapter, ProviderInfo, CompletionRequest, StreamChunk, Message, ToolDefinition, ToolCall, ChatWithToolsResponse } from './base.js';
 import { JamError } from '../utils/errors.js';
+import { proxyFetch } from '../utils/fetch.js';
+import type { FetchOptions } from '../utils/fetch.js';
 
 const DEFAULT_BASE_URL = 'http://localhost:11434';
 
@@ -41,10 +43,15 @@ export class OllamaAdapter implements ProviderAdapter {
 
   private readonly baseUrl: string;
   private readonly model: string;
+  private readonly fetchOptions: FetchOptions;
 
-  constructor(options: { baseUrl?: string; model?: string } = {}) {
+  constructor(options: { baseUrl?: string; model?: string; requestTimeoutMs?: number; tlsCaPath?: string } = {}) {
     this.baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, '');
     this.model = options.model ?? 'llama3.2';
+    this.fetchOptions = {
+      timeoutMs: options.requestTimeoutMs,
+      tlsCaPath: options.tlsCaPath,
+    };
   }
 
   async listModels(): Promise<string[]> {
@@ -54,9 +61,7 @@ export class OllamaAdapter implements ProviderAdapter {
 
     let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}/api/tags`, {
-        signal: AbortSignal.timeout(5000),
-      });
+      response = await proxyFetch(`${this.baseUrl}/api/tags`, {}, { ...this.fetchOptions, timeoutMs: this.fetchOptions.timeoutMs ?? 5000 });
     } catch (err) {
       const cause = err as NodeJS.ErrnoException;
       const isConnRefused = cause?.code === 'ECONNREFUSED' || cause?.code === 'ECONNRESET';
@@ -87,9 +92,7 @@ export class OllamaAdapter implements ProviderAdapter {
 
   async validateCredentials(): Promise<void> {
     try {
-      const response = await fetch(`${this.baseUrl}/api/tags`, {
-        signal: AbortSignal.timeout(5000),
-      });
+      const response = await proxyFetch(`${this.baseUrl}/api/tags`, {}, { ...this.fetchOptions, timeoutMs: this.fetchOptions.timeoutMs ?? 5000 });
       if (!response.ok) {
         throw new JamError(
           `Ollama returned HTTP ${response.status}. Is Ollama running at ${this.baseUrl}?\n` +
@@ -137,12 +140,11 @@ export class OllamaAdapter implements ProviderAdapter {
 
     let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}/api/chat`, {
+      response = await proxyFetch(`${this.baseUrl}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(120_000),
-      });
+      }, this.fetchOptions);
     } catch (err) {
       throw new JamError(
         `Failed to connect to Ollama at ${this.baseUrl}`,
@@ -264,12 +266,11 @@ export class OllamaAdapter implements ProviderAdapter {
 
     let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}/api/chat`, {
+      response = await proxyFetch(`${this.baseUrl}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(120_000),
-      });
+      }, this.fetchOptions);
     } catch (err) {
       throw new JamError(
         `Failed to connect to Ollama at ${this.baseUrl}`,

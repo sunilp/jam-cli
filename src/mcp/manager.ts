@@ -176,14 +176,21 @@ function isToolAllowed(toolName: string, config: McpServerConfig): boolean {
   return true;
 }
 
+const VALID_TYPES = new Set(['string', 'number', 'boolean', 'integer', 'array', 'object']);
+const MAX_DESCRIPTION_LENGTH = 1000;
+
 function mcpToolToSchema(serverName: string, tool: McpToolSchema): ToolDefinition {
   const properties: Record<string, { type: string; description?: string; enum?: string[] }> = {};
 
   if (tool.inputSchema.properties) {
     for (const [key, prop] of Object.entries(tool.inputSchema.properties)) {
+      // Validate property type
+      const propType = VALID_TYPES.has(prop.type) ? prop.type : 'string';
+      // Cap description length to prevent context stuffing
+      const desc = prop.description?.slice(0, MAX_DESCRIPTION_LENGTH);
       properties[key] = {
-        type: prop.type,
-        ...(prop.description ? { description: prop.description } : {}),
+        type: propType,
+        ...(desc ? { description: desc } : {}),
         ...(prop.enum ? { enum: prop.enum } : {}),
       };
     }

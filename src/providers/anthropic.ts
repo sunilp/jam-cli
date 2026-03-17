@@ -9,6 +9,8 @@ import type {
   ChatWithToolsResponse,
 } from './base.js';
 import { JamError } from '../utils/errors.js';
+import { proxyFetch } from '../utils/fetch.js';
+import type { FetchOptions } from '../utils/fetch.js';
 
 const DEFAULT_BASE_URL = 'https://api.anthropic.com';
 const DEFAULT_MODEL = 'claude-sonnet-4-20250514';
@@ -103,11 +105,16 @@ export class AnthropicAdapter implements ProviderAdapter {
   private readonly baseUrl: string;
   private readonly model: string;
   private readonly apiKey: string | undefined;
+  private readonly fetchOptions: FetchOptions;
 
-  constructor(options: { baseUrl?: string; model?: string; apiKey?: string } = {}) {
+  constructor(options: { baseUrl?: string; model?: string; apiKey?: string; requestTimeoutMs?: number; tlsCaPath?: string } = {}) {
     this.baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, '');
     this.model = options.model ?? DEFAULT_MODEL;
     this.apiKey = getApiKey(options.apiKey);
+    this.fetchOptions = {
+      timeoutMs: options.requestTimeoutMs,
+      tlsCaPath: options.tlsCaPath,
+    };
   }
 
   private authHeaders(): Record<string, string> {
@@ -129,10 +136,9 @@ export class AnthropicAdapter implements ProviderAdapter {
     const headers = this.authHeaders();
     let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}/v1/models`, {
+      response = await proxyFetch(`${this.baseUrl}/v1/models`, {
         headers,
-        signal: AbortSignal.timeout(10_000),
-      });
+      }, { ...this.fetchOptions, timeoutMs: this.fetchOptions.timeoutMs ?? 10_000 });
     } catch (err) {
       throw new JamError(
         `Cannot reach Anthropic at ${this.baseUrl}. Check your network connection.`,
@@ -180,12 +186,11 @@ export class AnthropicAdapter implements ProviderAdapter {
     const headers = this.authHeaders();
     let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}/v1/messages`, {
+      response = await proxyFetch(`${this.baseUrl}/v1/messages`, {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(120_000),
-      });
+      }, this.fetchOptions);
     } catch (err) {
       throw new JamError(
         `Failed to connect to Anthropic at ${this.baseUrl}`,
@@ -313,12 +318,11 @@ export class AnthropicAdapter implements ProviderAdapter {
     const headers = this.authHeaders();
     let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}/v1/messages`, {
+      response = await proxyFetch(`${this.baseUrl}/v1/messages`, {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(120_000),
-      });
+      }, this.fetchOptions);
     } catch (err) {
       throw new JamError(
         `Failed to connect to Anthropic at ${this.baseUrl}`,

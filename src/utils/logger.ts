@@ -14,7 +14,23 @@ export class Logger {
 
   constructor(level: LogLevel = 'warn', redactPatterns: string[] = []) {
     this.level = level;
-    this.patterns = redactPatterns.map((p) => new RegExp(p, 'gi'));
+    // Always redact API key patterns + user-provided patterns
+    const builtinPatterns = [
+      'sk-ant-[a-zA-Z0-9_-]{20,}',
+      'sk-[a-zA-Z0-9_-]{20,}',
+      'gsk_[a-zA-Z0-9_-]{20,}',
+    ];
+    this.patterns = [...builtinPatterns, ...redactPatterns].map((p) => new RegExp(p, 'gi'));
+  }
+
+  configure(level: LogLevel, redactPatterns: string[] = []): void {
+    this.level = level;
+    const builtinPatterns = [
+      'sk-ant-[a-zA-Z0-9_-]{20,}',
+      'sk-[a-zA-Z0-9_-]{20,}',
+      'gsk_[a-zA-Z0-9_-]{20,}',
+    ];
+    this.patterns = [...builtinPatterns, ...redactPatterns].map((p) => new RegExp(p, 'gi'));
   }
 
   private redact(message: string): string {
@@ -59,5 +75,3 @@ export class Logger {
 
 // Singleton logger — configured at startup in src/index.ts
 export const logger = new Logger();
-
-// test small change

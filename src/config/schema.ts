@@ -11,6 +11,10 @@ export const ProfileSchema = z.object({
   temperature: z.number().min(0).max(2).optional(),
   maxTokens: z.number().int().positive().optional(),
   systemPrompt: z.string().optional(),
+  /** Request timeout in milliseconds for API calls. Default: 120000 (2 min). */
+  requestTimeoutMs: z.number().int().positive().optional(),
+  /** Path to a PEM file containing custom CA certificates (for corporate proxies / self-signed certs). */
+  tlsCaPath: z.string().optional(),
 });
 export type Profile = z.infer<typeof ProfileSchema>;
 

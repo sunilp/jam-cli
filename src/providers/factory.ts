@@ -54,6 +54,8 @@ export async function createProvider(profile: Profile): Promise<ProviderAdapter>
     return new OllamaAdapter({
       baseUrl: profile.baseUrl,
       model: profile.model,
+      requestTimeoutMs: profile.requestTimeoutMs,
+      tlsCaPath: profile.tlsCaPath,
     });
   }
 
@@ -63,6 +65,8 @@ export async function createProvider(profile: Profile): Promise<ProviderAdapter>
       baseUrl: profile.baseUrl,
       model: profile.model,
       apiKey: profile.apiKey,
+      requestTimeoutMs: profile.requestTimeoutMs,
+      tlsCaPath: profile.tlsCaPath,
     });
   }
 
@@ -72,6 +76,8 @@ export async function createProvider(profile: Profile): Promise<ProviderAdapter>
       baseUrl: profile.baseUrl,
       model: profile.model,
       apiKey: profile.apiKey,
+      requestTimeoutMs: profile.requestTimeoutMs,
+      tlsCaPath: profile.tlsCaPath,
     });
   }
 
@@ -81,6 +87,8 @@ export async function createProvider(profile: Profile): Promise<ProviderAdapter>
       baseUrl: profile.baseUrl,
       model: profile.model,
       apiKey: profile.apiKey,
+      requestTimeoutMs: profile.requestTimeoutMs,
+      tlsCaPath: profile.tlsCaPath,
     });
   }
 

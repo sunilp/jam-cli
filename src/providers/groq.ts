@@ -15,12 +15,14 @@ export class GroqAdapter extends OpenAIAdapter {
     supportsStreaming: true,
   };
 
-  constructor(options: { baseUrl?: string; model?: string; apiKey?: string } = {}) {
+  constructor(options: { baseUrl?: string; model?: string; apiKey?: string; requestTimeoutMs?: number; tlsCaPath?: string } = {}) {
     const apiKey = options.apiKey ?? process.env['GROQ_API_KEY'];
     super({
       baseUrl: options.baseUrl ?? GROQ_BASE_URL,
       model: options.model ?? DEFAULT_MODEL,
       apiKey,
+      requestTimeoutMs: options.requestTimeoutMs,
+      tlsCaPath: options.tlsCaPath,
     });
   }
 }
