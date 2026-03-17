@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { loadConfig, getActiveProfile } from '../config/loader.js';
-import { createProvider, blockIfNoToolSupport } from '../providers/factory.js';
+import { createProvider } from '../providers/factory.js';
 import { withRetry, collectStream } from '../utils/stream.js';
 import { streamToStdout, printJsonResult, printError } from '../ui/renderer.js';
 import { JamError } from '../utils/errors.js';
@@ -54,8 +54,6 @@ export async function runDiff(options: DiffOptions): Promise<void> {
     const config = await loadConfig(process.cwd(), options);
     const profile = getActiveProfile(config);
     const adapter = await createProvider(profile);
-    blockIfNoToolSupport(adapter, 'diff');
-
     const context = options.staged
       ? 'These are the staged changes (ready to commit).'
       : 'These are the current working tree changes (unstaged).';
