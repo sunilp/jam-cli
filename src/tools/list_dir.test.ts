@@ -87,4 +87,16 @@ describe('list_dir tool', () => {
     expect(result.output).toContain('adir/');
     expect(result.output).not.toMatch(/afile\.txt\//);
   });
+
+  it('blocks path traversal with ../', async () => {
+    await expect(
+      listDirTool.execute({ path: '../../' }, ctx)
+    ).rejects.toMatchObject({ code: 'TOOL_DENIED' });
+  });
+
+  it('blocks absolute paths outside workspace', async () => {
+    await expect(
+      listDirTool.execute({ path: '/etc' }, ctx)
+    ).rejects.toMatchObject({ code: 'TOOL_DENIED' });
+  });
 });

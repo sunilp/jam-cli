@@ -103,6 +103,18 @@ describe('read_file tool', () => {
     expect(result.metadata).toMatchObject({ startLine: 3, endLine: 5 });
   });
 
+  it('blocks path traversal with ../', async () => {
+    await expect(
+      readFileTool.execute({ path: '../../etc/passwd' }, ctx)
+    ).rejects.toMatchObject({ code: 'TOOL_DENIED' });
+  });
+
+  it('blocks absolute paths outside workspace', async () => {
+    await expect(
+      readFileTool.execute({ path: '/etc/passwd' }, ctx)
+    ).rejects.toMatchObject({ code: 'TOOL_DENIED' });
+  });
+
   it('coerces string line numbers from small models', async () => {
     const content = Array.from({ length: 10 }, (_, i) => `line ${i + 1}`).join('\n');
     await writeFile(join(tmpDir, 'str.txt'), content);

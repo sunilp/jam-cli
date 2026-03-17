@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
 import { JamError } from '../utils/errors.js';
+import { safePath } from './types.js';
 import type { ToolDefinition, ToolContext, ToolResult } from './types.js';
 
 const MAX_BYTES = 500 * 1024; // 500KB
@@ -33,7 +33,7 @@ export const readFileTool: ToolDefinition = {
       throw new JamError('Argument "path" must be a non-empty string.', 'INPUT_MISSING');
     }
 
-    const absolutePath = resolve(ctx.workspaceRoot, filePath);
+    const absolutePath = await safePath(ctx.workspaceRoot, filePath);
 
     let buffer: Buffer;
     try {

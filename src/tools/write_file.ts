@@ -1,6 +1,7 @@
 import { writeFile, appendFile, mkdir } from 'node:fs/promises';
-import { resolve, dirname } from 'node:path';
+import { dirname } from 'node:path';
 import { JamError } from '../utils/errors.js';
+import { safePath } from './types.js';
 import type { ToolDefinition, ToolContext, ToolResult } from './types.js';
 
 export const writeFileTool: ToolDefinition = {
@@ -34,7 +35,7 @@ export const writeFileTool: ToolDefinition = {
     }
 
     const mode = args['mode'] === 'append' ? 'append' : 'overwrite';
-    const absolutePath = resolve(ctx.workspaceRoot, filePath);
+    const absolutePath = await safePath(ctx.workspaceRoot, filePath);
     const parentDir = dirname(absolutePath);
 
     try {

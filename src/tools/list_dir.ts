@@ -1,7 +1,7 @@
 import { readdir } from 'node:fs/promises';
 import type { Dirent } from 'node:fs';
-import { resolve } from 'node:path';
 import { JamError } from '../utils/errors.js';
+import { safePath } from './types.js';
 import type { ToolDefinition, ToolContext, ToolResult } from './types.js';
 
 export const listDirTool: ToolDefinition = {
@@ -22,7 +22,7 @@ export const listDirTool: ToolDefinition = {
 
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     const dirPath = typeof args['path'] === 'string' ? args['path'] : '.';
-    const absolutePath = resolve(ctx.workspaceRoot, dirPath);
+    const absolutePath = await safePath(ctx.workspaceRoot, dirPath);
 
     let entries: Dirent[];
     try {

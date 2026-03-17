@@ -94,4 +94,16 @@ describe('write_file tool', () => {
     expect(written).toBe('');
     expect(result.output).toBe('Written 0 bytes to empty.txt');
   });
+
+  it('blocks path traversal with ../', async () => {
+    await expect(
+      writeFileTool.execute({ path: '../../evil.txt', content: 'hacked' }, ctx)
+    ).rejects.toMatchObject({ code: 'TOOL_DENIED' });
+  });
+
+  it('blocks absolute paths outside workspace', async () => {
+    await expect(
+      writeFileTool.execute({ path: '/tmp/evil.txt', content: 'hacked' }, ctx)
+    ).rejects.toMatchObject({ code: 'TOOL_DENIED' });
+  });
 });
