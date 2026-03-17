@@ -36,9 +36,9 @@ export async function runDoctor(options: CliOverrides): Promise<void> {
       const version = process.version;
       const major = parseInt(version.slice(1).split('.')[0] ?? '0', 10);
       if (major < 20) {
-        return { status: 'fail' as const, detail: `Node.js ${version} detected — upgrade to v20 or later` };
+        return Promise.resolve({ status: 'fail' as const, detail: `Node.js ${version} detected — upgrade to v20 or later` });
       }
-      return { status: 'pass' as const, detail: version };
+      return Promise.resolve({ status: 'pass' as const, detail: version });
     }),
 
     // 2. Config file parse check
