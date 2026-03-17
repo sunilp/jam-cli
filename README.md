@@ -25,6 +25,7 @@
 [![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-green.svg)](https://nodejs.org)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 [![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-yellow.svg)](https://conventionalcommits.org)
+[![Website](https://img.shields.io/badge/Website-jam.sunilprakash.com-2d7d6f)](https://jam.sunilprakash.com)
 
 Ask questions · Trace call graphs · Review diffs · Generate patches · Run agentic tasks · Connect to MCP servers · Generate diagrams · Plugin system · 14 built-in dev utilities
 
