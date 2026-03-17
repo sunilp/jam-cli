@@ -125,8 +125,9 @@ interface NodeLlamaCppModule {
 
 export class EmbeddedAdapter implements ProviderAdapter {
   readonly info: ProviderInfo = {
-    name: 'embedded (experimental)',
+    name: 'embedded',
     supportsStreaming: true,
+    supportsTools: false,
   };
 
   private readonly modelSpec: string | undefined;
@@ -165,8 +166,9 @@ export class EmbeddedAdapter implements ProviderAdapter {
     ensureModelsDir();
 
     process.stderr.write(
-      '\n  ⚠️  Embedded provider is EXPERIMENTAL. Quality is limited by small model size.\n' +
-      '  For production workloads, consider using Ollama or OpenAI.\n\n'
+      '\n  Using embedded provider — model runs in-process via node-llama-cpp.\n' +
+      '  Best for: simple Q&A, quick explanations, and summarization.\n' +
+      '  For agentic tasks (ask with tools, run, diff, review, commit): use Ollama or a cloud provider.\n\n'
     );
 
     const resolved = resolveModel(this.modelSpec);

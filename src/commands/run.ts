@@ -1,7 +1,7 @@
 import { createInterface } from 'node:readline/promises';
 import { join } from 'node:path';
 import { loadConfig, getActiveProfile } from '../config/loader.js';
-import { createProvider } from '../providers/factory.js';
+import { createProvider, blockIfEmbedded } from '../providers/factory.js';
 import { printError, printWarning, renderMarkdown } from '../ui/renderer.js';
 import { JamError } from '../utils/errors.js';
 import { getWorkspaceRoot } from '../utils/workspace.js';
@@ -71,6 +71,7 @@ export async function runRun(instruction: string | undefined, options: RunOption
     const config = options.yes ? { ...rawConfig, toolPolicy: 'always' as const } : rawConfig;
     const profile = getActiveProfile(config);
     const adapter = await createProvider(profile);
+    blockIfEmbedded(adapter, 'run');
 
     // Connect to MCP servers (non-fatal if any fail)
     const mcpManager = await createMcpManager(config.mcpServers, stderrLog, config.mcpGroups);

@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createInterface } from 'node:readline/promises';
 import { loadConfig, getActiveProfile } from '../config/loader.js';
-import { createProvider } from '../providers/factory.js';
+import { createProvider, blockIfEmbedded } from '../providers/factory.js';
 import { withRetry, collectStream } from '../utils/stream.js';
 import { printError, printSuccess } from '../ui/renderer.js';
 import { JamError } from '../utils/errors.js';
@@ -411,6 +411,7 @@ export async function runCommit(options: CommitOptions): Promise<void> {
     const config = await loadConfig(process.cwd(), options);
     const profile = getActiveProfile(config);
     const adapter = await createProvider(profile);
+    blockIfEmbedded(adapter, 'commit');
 
     // Build a context-aware diff prompt — falls back to stat-only summary
     // if the diff would overflow the provider's context window.

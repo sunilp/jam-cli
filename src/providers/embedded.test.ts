@@ -61,8 +61,9 @@ describe('EmbeddedAdapter', () => {
   it('exposes correct provider info', async () => {
     const { EmbeddedAdapter } = await import('./embedded.js');
     const adapter = new EmbeddedAdapter();
-    expect(adapter.info.name).toBe('embedded (experimental)');
+    expect(adapter.info.name).toBe('embedded');
     expect(adapter.info.supportsStreaming).toBe(true);
+    expect(adapter.info.supportsTools).toBe(false);
   });
 
   it('validateCredentials boots the model', async () => {

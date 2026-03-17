@@ -27,6 +27,24 @@ export function inferProviderFromModel(model: string): string | null {
   return null;
 }
 
+/**
+ * Commands that require complex reasoning (tool calling, code review, diff analysis)
+ * should call this after creating the adapter. If the provider is embedded, it prints
+ * a warning and exits with a helpful message.
+ */
+export function blockIfEmbedded(adapter: ProviderAdapter, command: string): void {
+  if (adapter.info?.supportsTools === false) {
+    process.stderr.write(
+      `\n  The embedded provider cannot handle "${command}" — it requires tool calling and complex reasoning.\n` +
+      `  Use a larger model instead:\n\n` +
+      `    jam ${command} --provider ollama\n` +
+      `    jam ${command} --provider anthropic\n` +
+      `    jam ${command} --provider openai\n\n`
+    );
+    process.exit(1);
+  }
+}
+
 export async function createProvider(profile: Profile): Promise<ProviderAdapter> {
   // Auto-detect provider from model name if not explicitly set to a non-default value
   const provider = profile.provider;
@@ -67,10 +85,6 @@ export async function createProvider(profile: Profile): Promise<ProviderAdapter>
   }
 
   if (provider === 'embedded') {
-    process.stderr.write(
-      '\n  \x1b[33m[EXPERIMENTAL]\x1b[0m Using embedded provider — model runs in-process via node-llama-cpp.\n' +
-      '  Model will be downloaded on first use only when provider is set to "embedded".\n\n'
-    );
     const { EmbeddedAdapter } = await import('./embedded.js');
     return new EmbeddedAdapter({
       model: profile.model,

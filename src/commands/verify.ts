@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import { access, constants, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { loadConfig, getActiveProfile } from '../config/loader.js';
-import { createProvider } from '../providers/factory.js';
+import { createProvider, blockIfEmbedded } from '../providers/factory.js';
 import { collectStream, withRetry } from '../utils/stream.js';
 import { printError } from '../ui/renderer.js';
 import { JamError } from '../utils/errors.js';
@@ -347,6 +347,7 @@ async function checkAiRisk(
   const config = await loadConfig(cwd, options);
   const profile = getActiveProfile(config);
   const adapter = await createProvider(profile);
+  blockIfEmbedded(adapter, 'verify');
 
   const truncatedDiff = diff.length > 15000 ? diff.slice(0, 15000) + '\n... (truncated)' : diff;
 

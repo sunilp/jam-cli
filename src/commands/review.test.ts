@@ -18,6 +18,7 @@ vi.mock('../config/loader.js', () => ({
 
 vi.mock('../providers/factory.js', () => ({
   createProvider: vi.fn(),
+  blockIfEmbedded: vi.fn(),
 }));
 
 vi.mock('../utils/stream.js', () => ({
