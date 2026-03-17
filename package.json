@@ -1,6 +1,6 @@
 {
   "name": "@sunilp-org/jam-cli",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "description": "Jam — developer-first AI assistant CLI for the terminal. Ask questions, explain code, review diffs, generate patches, and run agentic tasks powered by Ollama.",
   "type": "module",
   "license": "MIT",
