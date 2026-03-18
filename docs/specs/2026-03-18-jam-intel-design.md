@@ -1,7 +1,7 @@
 # jam intel — Codebase Intelligence
 
 **Date:** 2026-03-18
-**Status:** Design approved, pending implementation plan
+**Status:** Design reviewed, pending implementation plan
 
 ## Overview
 
@@ -11,9 +11,24 @@
 
 - **Understands intent, not just structure** — LLM-enriched nodes carry purpose, domain, pattern, and risk metadata. "This is the authentication middleware" vs "these files import each other."
 - **Multi-repo, multi-language** — links services across repositories, including legacy systems (COBOL) alongside modern stacks.
-- **Always current** — file watcher keeps the graph in sync. No stale architecture docs.
+- **Always current** — incremental re-scan detects changes via mtime (v1), file watcher keeps graph in continuous sync (v2). No stale architecture docs.
 - **Architecture diagram first** — initial scan immediately produces a visual architecture diagram before any LLM enrichment. The diagram upgrades in place as semantic understanding deepens.
 - **Queryable** — natural language queries answered against the graph with visual responses.
+
+## Relationship to Existing Code
+
+jam-cli already has analysis infrastructure that `jam intel` builds on:
+
+| Existing | Reuse in jam intel |
+|----------|-------------------|
+| `src/analyzers/imports.ts` — import graph builder (regex-based, cycle detection via Tarjan's) | Extend as the TS/JS import analyzer plugin. Add export tracking. |
+| `src/analyzers/structure.ts` — project structure analyzer (module grouping, symbol extraction, hotspot detection) | Reuse for the structural scan phase. Feed its `ProjectAnalysis` output into the knowledge graph. |
+| `src/analyzers/types.ts` — `Graph`, `ModuleInfo`, `SymbolInfo`, `ProjectAnalysis` types | Extend with new node/edge types for the knowledge graph. Maintain backwards compatibility. |
+| `src/utils/call-graph.ts` — call graph builder (definition finding, reference tracking, Mermaid output) | Reuse for `calls` edge extraction. Extend Mermaid output for architecture diagrams. |
+| `src/commands/diagram.ts` — Mermaid diagram generation | `jam intel diagram` delegates to this with richer graph data. `jam diagram` becomes an alias. |
+| `src/commands/stats.ts` — LOC, languages, complexity, git churn | Reuse git churn data for LLM enrichment prioritization (most-changed files first). |
+
+**Migration path for `jam diagram`:** `jam diagram` will remain as a standalone command for quick one-shot diagrams. `jam intel diagram` generates richer diagrams from the knowledge graph. Over time, `jam diagram` can optionally read from the intel graph if one exists, falling back to its current behavior.
 
 ## Architecture
 
@@ -23,13 +38,13 @@
 Source Repos → Static Analyzers → LLM Enrichment → Knowledge Graph → Consumers
 ```
 
-**Static Analyzers** (offline, seconds): AST parsing, import graphs, call graphs, DB schema extraction, API endpoint detection, config/Docker/CI analysis. Builds the structural skeleton.
+**Static Analyzers** (offline, seconds): Extend existing `src/analyzers/` with pluggable language analyzers. Builds the structural skeleton and immediately generates architecture diagram.
 
-**LLM Enrichment** (background, progressive): Adds semantic metadata to every node — purpose, domain, pattern, risk, summary, and semantic edges that static analysis can't see. Prioritized by connectivity × change frequency.
+**LLM Enrichment** (background, progressive): Adds semantic metadata to every node. Prioritized by connectivity × change frequency. Optional — can be skipped with `--no-enrich`.
 
-**Knowledge Graph**: Hybrid storage — JSON on disk (`.jam/intel/graph.json` per repo), in-memory graph at runtime for fast querying. Portable, git-friendly, no database dependency.
+**Knowledge Graph**: Hybrid storage — JSON on disk (`.jam/intel/` directory per repo), in-memory graph at runtime for fast querying. Portable, no database dependency.
 
-**Consumers**: VSCode sidebar panel, browser explorer, CLI, Copilot Chat (`@jam /intel`).
+**Consumers**: CLI (v1), browser explorer with Mermaid (v1), interactive browser app (v2), VSCode sidebar panel (v2), Copilot Chat (v2).
 
 ### Data Model
 
@@ -80,29 +95,29 @@ Relationships between nodes:
 
 ### Phase 1: Instant Structural Scan (seconds, offline)
 
-No LLM needed. Builds the skeleton graph immediately and generates the first architecture diagram.
+No LLM needed. Reuses existing analyzers (`src/analyzers/imports.ts`, `src/analyzers/structure.ts`, `src/utils/call-graph.ts`). Builds the skeleton graph and immediately generates an architecture diagram.
 
 **Extracts:**
-- File tree and language detection
-- Import graph and exports / public API
-- Class and function signatures
-- Database schemas (SQL migrations, ORM models)
-- API routes (Express, Flask, Spring, etc.)
-- Package manifests (package.json, requirements.txt, pom.xml, etc.)
-- Docker / docker-compose configuration
-- CI/CD pipeline definitions
-- Environment variable references and config files
+- File tree and language detection (reuse from `jam stats`)
+- Import graph and exports / public API (extend `src/analyzers/imports.ts`)
+- Class and function signatures (extend `src/analyzers/structure.ts`)
+- Call graph (reuse `src/utils/call-graph.ts`)
+- Database schemas (SQL migrations, ORM models) — new analyzer
+- API routes (Express route detection) — new analyzer
+- Package manifests (package.json, requirements.txt, pom.xml, etc.) — new analyzer
+- Docker / docker-compose configuration — new analyzer
+- Environment variable references — new analyzer
 
 **Immediate output:**
-- Architecture diagram generated from structural data (service boundaries, major modules, connections)
-- Graph is explorable immediately
-- Diagram opens in browser automatically
+- Architecture diagram generated from structural data (Mermaid format, opens in browser via static HTML + Mermaid.js)
+- Graph is queryable via CLI immediately
+- Mermaid diagram saved to `.jam/intel/architecture.mmd`
 
 ### Phase 2: Progressive LLM Enrichment (background, minutes)
 
 Runs in background while the user explores the structural graph. Nodes are enriched in priority order:
 
-1. **Priority 1** — Entry points, high-connectivity hubs, most-changed files (via git history)
+1. **Priority 1** — Entry points, high-connectivity hubs, most-changed files (via git churn from `jam stats`)
 2. **Priority 2** — Service boundaries, API layers, database access patterns
 3. **Priority 3** — Internal modules, utilities, tests, leaf nodes
 
@@ -110,34 +125,52 @@ As enrichment progresses:
 - Architecture diagram upgrades in place with semantic labels, domain groupings, purpose annotations
 - Flow diagrams are generated (data flow, request lifecycle, event flow)
 - API dependency maps appear
-- Cross-repo interaction diagrams surface
-- Nodes in the explorer gain semantic badges in real-time
+- Cross-repo interaction diagrams surface (v2)
 
 **Per node, the LLM generates:** purpose label, domain tag, pattern detection, risk score, plain-English summary, semantic edges (relationships static analysis missed).
 
-### Phase 3: File Watcher — Continuous Sync (ongoing)
+**Enrichment depth levels:**
+- `--enrich=shallow` — summary and purpose only (~100 tokens/node)
+- `--enrich=deep` — full metadata including risk, patterns, semantic edges (~400 tokens/node)
+- `--no-enrich` — structural graph only, no LLM calls
 
-Watches for file changes and incrementally updates the graph:
+### Phase 3: File Watcher — Continuous Sync (v2)
 
-- **File saved** → re-parse AST, update edges, queue for LLM re-enrichment
-- **File created** → add node, run static analysis, queue for enrichment
-- **File deleted** → remove node, clean up dangling edges
-- **Branch switch** → diff the file tree, batch-update changed nodes
-- **Dependency change** → re-scan package manifests, update external nodes
+Deferred to v2. In v1, users re-run `jam intel scan` to update the graph (incremental — only re-analyzes changed files based on mtime comparison).
+
+In v2, the file watcher:
+- Runs as a background process started by `jam intel watch` or by the VSCode extension
+- Debounces rapid saves (500ms window)
+- Watches via `chokidar` or Node.js `fs.watch` (not polling)
+- On file change → re-parse that file, update graph edges, queue for LLM re-enrichment
+- On branch switch (detected via `.git/HEAD` change) → diff file tree, batch-update
+- Persists via the VSCode extension host process (not a standalone daemon)
+- Lock file (`.jam/intel/.lock`) prevents concurrent writes from multiple terminals
 
 ### Language Support — Pluggable Analyzers
 
-Each language gets an analyzer plugin:
+Each language gets an analyzer plugin implementing an `Analyzer` interface:
 
-**v1 (Launch):** TypeScript/JavaScript, Python, Java, COBOL, SQL (migrations/schemas), Docker/docker-compose, OpenAPI/Swagger
+```typescript
+interface Analyzer {
+  languages: string[];           // e.g., ['typescript', 'javascript']
+  extensions: string[];          // e.g., ['.ts', '.tsx', '.js', '.jsx']
+  analyze(file: string): Node[]; // Extract nodes from a file
+  edges(nodes: Node[]): Edge[];  // Compute edges between nodes
+}
+```
 
-**v2 (Expand):** Go, Rust, C#/.NET, Ruby, Terraform/Kubernetes, GraphQL
+**v1 (Launch):** TypeScript/JavaScript (extend existing `src/analyzers/`), Python, COBOL, SQL (migrations/schemas), Docker/docker-compose, OpenAPI/Swagger
+
+**v2 (Expand):** Java, Go, Rust, C#/.NET, Ruby, Terraform/Kubernetes, GraphQL
 
 **v3 (Community):** Plugin API for custom analyzers (`jam plugin create --analyzer`)
 
+Note: v1 Python and COBOL analyzers will use regex-based extraction (similar to existing TS/JS approach in `src/analyzers/imports.ts`), not full AST parsing. This gives 80% coverage with manageable effort. AST-based parsing can be added per-language in subsequent versions.
+
 ### Multi-Repo — Workspace Manifest
 
-Multiple repos are linked via a workspace manifest:
+Multiple repos are linked via an auto-generated workspace manifest:
 
 ```json
 // .jam/intel/workspace.json
@@ -147,35 +180,39 @@ Multiple repos are linked via a workspace manifest:
     { "name": "web-app", "path": "../web-app" },
     { "name": "legacy-batch", "path": "../legacy-batch" }
   ],
-  "crossRepoEdges": [
-    { "from": "api-service:UserEndpoint", "to": "web-app:UserApi", "type": "consumes" },
-    { "from": "api-service:events", "to": "web-app:webhookHandler", "type": "subscribes" },
-    { "from": "shared-lib:types", "to": "api-service:models", "type": "imports" }
-  ]
+  "crossRepoEdges": []
 }
 ```
 
-Cross-repo edges are discovered by LLM (matching API contracts, shared types, event names) and confirmed by static analysis where possible.
+**Lifecycle:** `jam intel scan --workspace ../a ../b ../c` creates the manifest with repo entries. `crossRepoEdges` starts empty. During LLM enrichment, the LLM discovers cross-repo connections (matching API contracts, shared types, event names, shared DB tables) and populates the edges automatically. Users can also manually add edges to the manifest. Subsequent scans preserve user-added edges and re-validate LLM-discovered ones.
+
+Multi-repo scanning is a v2 feature. v1 focuses on single-repo analysis.
 
 ## Visualization & Query Layer
 
-### Two-Tier Visualization
+### v1: CLI Output + Mermaid Diagrams
 
-**VSCode Sidebar Panel (lightweight):**
-- Architecture tree view (always visible)
-- Enrichment progress indicator
-- Quick query input
-- Click node → jump to file in editor
-- "Open in Browser" button for full explorer
-- Auto-refreshes on file save
+**Architecture diagram:** Generated as Mermaid markup, rendered via a static HTML page bundled with Mermaid.js. `jam intel scan` opens this in the default browser. The HTML page auto-reloads when the `.mmd` file changes (simple file polling).
 
-**Browser Explorer (full interactive):**
+**Query output:** Text responses in the terminal, optionally with Mermaid diagram output (`--format mermaid`).
+
+**Impact output:** Text list of affected files with risk levels (HIGH/MED/LOW), optionally with Mermaid subgraph.
+
+### v2: Interactive Browser Explorer
+
+A single-page application (likely using D3.js or Cytoscape.js) served from a local HTTP server (`jam intel explore`). Ships as bundled static assets within the npm package.
+
+Features:
 - Zoomable, pannable graph visualization
 - Filter chips: All Repos, Services, Data Flow, API Layer, Database
 - Natural language query bar
 - Click node → detail panel (purpose, dependencies, risk, file links)
 - Animated impact paths for query results
 - Drill-down: click a service → see its internal modules → see individual files
+
+### v2: VSCode Sidebar Panel + Extensions
+
+Specified in a separate design document. Includes: sidebar tree view, context-aware right-click actions, auto-scan triggers, command palette entries, and Copilot Chat `@jam /intel` participant.
 
 ### Natural Language Queries
 
@@ -205,26 +242,94 @@ Four categories of queries:
 - "Which files have the highest change risk?"
 - "Find all event publishers and subscribers"
 
-### Query → Visual Response Flow
+### Query Execution Model
 
-Example: "What breaks if I rename the users table?"
+1. **LLM parses query** using tool-use / function-calling pattern. The LLM receives the query + a schema of available graph operations (`findNode`, `getNeighbors`, `traversePath`, `filterByType`, `filterByDomain`). It returns a structured query plan.
+2. **Graph engine executes** the plan against the in-memory graph. No LLM needed for traversal.
+3. **LLM summarizes results** — receives the subgraph and generates a natural-language explanation with context.
+4. **Output rendered** as text (CLI) or highlighted subgraph (browser explorer).
 
-1. LLM parses query → identifies target node: `table:users`
-2. Graph traversal → find all nodes connected via `reads`, `writes`, `references` edges (transitive)
-3. LLM enriches results → explains the impact in context ("The COBOL batch job parses the record layout directly — a schema change requires updating the COPYBOOK")
-4. Visualizer highlights the impact subgraph — affected nodes glow, edges animate to show propagation paths
-5. Detail panel shows: affected files with risk scores, suggested migration steps, "Open in editor" links
+**Latency target:** < 5 seconds for most queries (one LLM call to parse, graph traversal is instant, one LLM call to summarize).
+
+**Offline mode:** When no LLM is available, queries fall back to keyword matching against node names, types, and file paths. Results are structural only (no semantic interpretation). The `--no-ai` flag forces this mode.
+
+## Configuration
+
+New fields in `JamConfigSchema` (`src/config/schema.ts`):
+
+```typescript
+intel: {
+  enrichDepth: 'shallow' | 'deep' | 'none',  // default: 'deep'
+  maxTokenBudget: number,                      // default: 500000 (per scan)
+  storageDir: string,                          // default: '.jam/intel'
+  autoScan: boolean,                           // default: false (v2: true when file watcher enabled)
+  excludePatterns: string[],                   // default: ['node_modules', 'dist', '.git', 'vendor']
+  diagramFormat: 'mermaid',                     // default: 'mermaid' (more formats in v2)
+  openBrowserOnScan: boolean,                  // default: true
+}
+```
+
+## Storage & Scalability
+
+### File Layout
+
+```
+.jam/intel/
+├── graph.json          # Node and edge data (structural)
+├── enrichment.json     # LLM-generated metadata (separate for easy regeneration)
+├── architecture.mmd    # Latest architecture diagram (Mermaid)
+├── workspace.json      # Multi-repo manifest (if applicable)
+└── .lock               # Prevents concurrent writes
+```
+
+Structural data (`graph.json`) and LLM enrichment (`enrichment.json`) are stored separately so enrichment can be regenerated without re-scanning, and structural data remains useful without any LLM.
+
+### Size Estimates
+
+| Repo size | Nodes | graph.json | enrichment.json | Memory |
+|-----------|-------|------------|-----------------|--------|
+| Small (100 files) | ~500 | ~200KB | ~300KB | ~5MB |
+| Medium (1000 files) | ~5,000 | ~2MB | ~3MB | ~30MB |
+| Large (10,000 files) | ~50,000 | ~20MB | ~30MB | ~200MB |
+
+For large repos (>5,000 nodes), the graph is sharded by module into separate JSON files under `.jam/intel/shards/`. The in-memory graph loads lazily — only the top-level module graph is loaded initially, with sub-module graphs loaded on drill-down.
+
+**Gitignore:** `.jam/intel/` should be added to `.gitignore` by default. The enrichment data varies by model and is not reproducible. `jam intel scan` warns if the directory is not gitignored.
+
+## Cost Model
+
+### Token Estimates (per scan)
+
+| Enrichment | Tokens/node | 500-file repo | 1000-file repo | 5000-file repo |
+|------------|-------------|---------------|----------------|----------------|
+| `shallow` | ~200 | ~100K | ~200K | ~1M |
+| `deep` | ~600 | ~300K | ~600K | ~3M |
+
+### Provider Considerations
+
+| Provider | Practical limit | Notes |
+|----------|----------------|-------|
+| Ollama (local) | No token cost, but slow on large repos | Enrichment may take 10-30 min for 1000+ files |
+| Copilot (via VSCode) | Free with subscription, rate limited | May need to throttle enrichment requests |
+| Anthropic / OpenAI | Token cost applies | `maxTokenBudget` config enforced; scan stops enrichment when budget exhausted |
+| Groq | Fast but rate limited | Good for shallow enrichment |
+
+`jam intel scan` reports estimated token usage before starting enrichment. With `--dry-run`, it shows the estimate without starting.
 
 ## CLI Commands
 
 ```
-jam intel scan                           # Scan current repo, generate architecture diagram
-jam intel scan --workspace ../a ../b     # Multi-repo scan with workspace manifest
-jam intel query "what handles auth?"     # Natural language query (text + Mermaid output)
-jam intel impact src/models/user.ts      # Impact analysis for a specific file
-jam intel explore                        # Open browser-based interactive explorer
-jam intel diagram --format mermaid       # Export architecture diagram
-jam intel status                         # Enrichment progress and graph stats
+jam intel scan                              # Scan current repo, generate architecture diagram
+jam intel scan --no-enrich                  # Structural scan only, no LLM
+jam intel scan --enrich=shallow             # Lighter LLM pass
+jam intel scan --dry-run                    # Show scan estimate without running
+jam intel scan --workspace ../a ../b        # Multi-repo scan (v2)
+jam intel query "what handles auth?"        # Natural language query
+jam intel query "auth" --no-ai              # Keyword-based structural query (offline)
+jam intel impact src/models/user.ts         # Impact analysis for a specific file
+jam intel explore                           # Open Mermaid diagram in browser (v1) / interactive explorer (v2)
+jam intel diagram --format mermaid          # Export architecture diagram
+jam intel status                            # Enrichment progress and graph stats
 ```
 
 ### Scan Output Behavior
@@ -233,62 +338,58 @@ jam intel status                         # Enrichment progress and graph stats
 $ jam intel scan
 ⚡ Structural scan... 247 files, 1,842 nodes, 3,291 edges (2.1s)
 🏗️ Architecture diagram generated → opening in browser...
-🧠 LLM enrichment started (diagram will update as understanding deepens)
+🧠 LLM enrichment started in background (est. ~150K tokens, 2-3 min)
 💾 Saved to .jam/intel/graph.json
 ```
 
 The architecture diagram is the hero artifact — generated immediately from structural data, opens in browser, and progressively upgrades as the LLM enriches nodes.
 
-## VSCode Extension Integration
+## Phasing Summary
 
-### Sidebar Panel
-- Architecture tree view (always visible)
-- Enrichment progress bar
-- Quick query input
-- Click node → jump to file in editor
-- "Open in Browser" for full explorer
-- Auto-refreshes on file save
+### v1 — Core (this spec)
 
-### Context-Aware Actions
-- Right-click file → "Show Impact Analysis"
-- Right-click function → "What depends on this?"
-- Right-click file → "Show in Architecture Graph"
-- Hover over import → see purpose of that module
-- Status bar shows current file's domain tag
+- Structural scan with pluggable analyzers (TS/JS, Python, COBOL, SQL, Docker, OpenAPI)
+- Knowledge graph data model + JSON storage
+- Progressive LLM enrichment with priority ordering and budget controls
+- Architecture diagram (Mermaid) generated immediately on scan
+- CLI commands: `scan`, `query`, `impact`, `explore`, `diagram`, `status`
+- NL query via CLI with tool-use pattern
+- Single-repo only
 
-### Auto-Scan Triggers
-- On workspace open → load cached graph
-- On file save → incremental re-scan
-- On git branch switch → diff and update
-- On new repo added to workspace → auto-scan
-- Background enrichment via extension host
+### v2 — Interactive + Multi-Repo
 
-### Command Palette
-- `Jam: Scan Workspace` — full re-scan
-- `Jam: Query Intelligence` — NL query input box
-- `Jam: Impact Analysis` — for current file
-- `Jam: Open Explorer` — browser view
-- `Jam: Explain Architecture` — system overview
+- Interactive browser explorer (D3/Cytoscape SPA)
+- Multi-repo workspace manifest with cross-repo edge discovery
+- File watcher for continuous sync
+- VSCode sidebar panel, context menus, hover providers (separate spec)
+- Copilot Chat `@jam /intel` participant (separate spec)
+- Additional language analyzers (Java, Go, Rust, C#, Ruby)
 
-## Copilot Chat Integration
+### v3 — Community + Enterprise
 
-`@jam /intel` queries the knowledge graph from within Copilot Chat:
-
-```
-@jam /intel What happens if I change the payment processing logic?
-```
-
-Responds with graph-aware context including cross-repo impact, risk assessment, and references to specific files — including legacy COBOL programs where applicable.
+- Plugin API for custom analyzers
+- Terraform/Kubernetes infrastructure mapping
+- Annotation layer (pin notes, tag ownership, save custom views)
+- Team sharing (export/import knowledge graphs)
+- GraphQL schema support
 
 ## Testing Strategy
 
-- **Static analyzers**: Unit tests per language analyzer with fixture repos
-- **Graph model**: Unit tests for node/edge operations, traversal, serialization
-- **LLM enrichment**: Mock-based tests for prompt construction and response parsing
-- **File watcher**: Integration tests with temp repos and simulated file changes
-- **Query layer**: End-to-end tests with pre-built graphs and expected query results
-- **Visualization**: Manual testing for VSCode panel and browser explorer
-- **Multi-repo**: Integration tests with multi-repo workspace fixtures
+### Fixtures
+
+- **Small TS/JS fixture repo** (~20 files): Express API with routes, models, services, tests. Used for structural scan and enrichment tests.
+- **Python fixture repo** (~15 files): Flask app with SQLAlchemy models. Tests Python analyzer.
+- **COBOL fixture** (~10 programs): Batch jobs with COPYBOOK references and DB2 access. Tests COBOL analyzer.
+- **Multi-language fixture** (~30 files): TS backend + Python ML service + SQL migrations. Tests cross-language edge detection.
+
+### Test Categories
+
+- **Static analyzers** (unit): Each analyzer tested against its fixture repo. Verify correct nodes, edges, and metadata extraction. Target: ~15 tests per analyzer.
+- **Graph model** (unit): Node/edge CRUD, traversal algorithms, serialization/deserialization, sharding. Target: ~25 tests.
+- **LLM enrichment** (unit, mocked): Prompt construction verified against snapshots. Response parsing with recorded LLM outputs. Budget enforcement tested. Target: ~15 tests.
+- **Query layer** (integration): Pre-built graph + canned queries → verify correct subgraph extraction and output format. Both NL mode (mocked LLM) and offline keyword mode. Target: ~20 tests.
+- **CLI commands** (integration): End-to-end tests running `jam intel scan` / `query` / `impact` against fixture repos. Target: ~15 tests.
+- **Performance benchmarks**: Structural scan of 500-file repo completes in < 3 seconds. Graph load of 5,000-node JSON completes in < 1 second. Query against 5,000-node graph returns in < 500ms (excluding LLM time).
 
 ## Competitive Positioning
 
