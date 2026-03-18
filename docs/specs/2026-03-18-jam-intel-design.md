@@ -168,6 +168,55 @@ interface Analyzer {
 
 Note: v1 Python and COBOL analyzers will use regex-based extraction (similar to existing TS/JS approach in `src/analyzers/imports.ts`), not full AST parsing. This gives 80% coverage with manageable effort. AST-based parsing can be added per-language in subsequent versions.
 
+### Framework & Tool Intelligence
+
+Analyzers don't just parse language syntax — they detect frameworks, libraries, and tools and understand their semantic patterns. During the structural scan, the scanner identifies framework markers (config files, directory conventions, import patterns) and activates framework-specific intelligence.
+
+**How it works:** The scan detects framework markers (e.g., `dbt_project.yml` → dbt, `dag` directory with `@dag` decorators → Airflow, `app.use()` calls → Express middleware). Each framework has a knowledge profile that tells the analyzer what patterns to look for and what semantic relationships they imply.
+
+**v1 Framework Profiles:**
+
+| Framework / Tool | Detected by | Understands |
+|-----------------|-------------|-------------|
+| **dbt** | `dbt_project.yml`, `models/` dir | Source→staging→mart flow, `ref()` / `source()` DAG, transformation lineage, data warehouse modeling patterns |
+| **Apache Airflow** | `dags/` dir, `@dag` / `@task` decorators | DAG orchestration, task dependencies, operator types, schedule intervals, sensor triggers |
+| **Apache Spark / PySpark** | `SparkSession` imports, `.read` / `.write` chains | Transformation flow (read→transform→write), data sources/sinks, partition strategies |
+| **Express.js** | `express()`, `app.use()`, `Router()` | Middleware chain, route→handler mapping, error handlers, static serving |
+| **Django** | `settings.py`, `urls.py`, `models.py` | Models→views→urls→templates pattern, ORM relationships, middleware stack, admin registrations |
+| **Flask** | `Flask(__name__)`, `@app.route` | Route→handler, blueprint structure, SQLAlchemy models if present |
+| **React** | `package.json` deps, `.tsx`/`.jsx` files | Component tree, state management (Redux/Zustand/Context), route structure (React Router), data fetching patterns |
+| **Spring Boot** | `pom.xml` with spring-boot, `@Controller` | Controller→service→repository layers, bean dependency injection, entity relationships (v2) |
+| **SQLAlchemy** | `declarative_base()`, `Column()` imports | Table relationships, foreign keys, migration chain (Alembic) |
+| **Prisma** | `schema.prisma` | Data model, relations, migration history |
+| **Docker Compose** | `docker-compose.yml` | Service topology, network links, volume mounts, dependency ordering |
+| **Kafka / Event Streaming** | Producer/consumer imports, topic configs | Publish→subscribe topology, topic→consumer group mapping, event schemas |
+| **CICS / DB2 (COBOL)** | `EXEC CICS` / `EXEC SQL` statements | Transaction flow, BMS map screens, DB2 table access, COMMAREA structures |
+
+**Framework detection output:** When a framework is detected, the scan:
+1. Adds a `framework` metadata field to relevant nodes (e.g., `framework: 'dbt'`)
+2. Creates framework-specific edges (e.g., dbt `ref()` calls become `depends-on` edges between models)
+3. Generates framework-aware diagrams (e.g., dbt lineage as a transformation flow diagram, Airflow DAG as a task dependency diagram)
+4. Labels nodes with framework-specific roles (e.g., "dbt staging model", "Airflow sensor task", "Express error middleware")
+
+The LLM enrichment layer then builds on this — it understands the framework context and can answer questions like "show me the data transformation flow from raw sources to the analytics mart" or "what happens if this Airflow task fails?"
+
+**Adding new framework profiles:** Framework profiles are declarative JSON files that specify detection markers, node patterns, edge patterns, and diagram templates. In v3, the plugin API allows community-contributed framework profiles (`jam plugin create --framework`).
+
+### Mermaid Diagram Export
+
+All diagram outputs support Mermaid format as the primary export, leveraging jam's existing Mermaid infrastructure (`src/utils/call-graph.ts`, `jam diagram`). Every view of the knowledge graph is exportable:
+
+```
+jam intel diagram                          # Architecture overview (default)
+jam intel diagram --type flow              # Data / request flow diagram
+jam intel diagram --type deps              # Dependency graph
+jam intel diagram --type impact FILE       # Impact subgraph for a file
+jam intel diagram --type framework         # Framework-specific (e.g., dbt lineage, Airflow DAG)
+jam intel query "show auth flow" --mermaid # Export any query result as Mermaid
+```
+
+All `--mermaid` output can be piped to `jam md2pdf` or saved as `.mmd` files. The browser explorer (v1: static Mermaid.js page, v2: interactive) renders these natively. Framework-specific diagrams use appropriate Mermaid diagram types (flowchart for data pipelines, sequence diagrams for request flows, ER diagrams for data models).
+
 ### Multi-Repo — Workspace Manifest
 
 Multiple repos are linked via an auto-generated workspace manifest:
@@ -349,9 +398,11 @@ The architecture diagram is the hero artifact — generated immediately from str
 ### v1 — Core (this spec)
 
 - Structural scan with pluggable analyzers (TS/JS, Python, COBOL, SQL, Docker, OpenAPI)
+- Framework & tool intelligence (dbt, Airflow, Spark, Express, Django, Flask, React, SQLAlchemy, Prisma, Docker Compose, Kafka, CICS/DB2)
 - Knowledge graph data model + JSON storage
 - Progressive LLM enrichment with priority ordering and budget controls
-- Architecture diagram (Mermaid) generated immediately on scan
+- Architecture diagram (Mermaid) generated immediately on scan — the hero artifact
+- Mermaid export for all diagram types (`--type flow`, `deps`, `impact`, `framework`) and query results (`--mermaid`)
 - CLI commands: `scan`, `query`, `impact`, `explore`, `diagram`, `status`
 - NL query via CLI with tool-use pattern
 - Single-repo only
@@ -364,10 +415,11 @@ The architecture diagram is the hero artifact — generated immediately from str
 - VSCode sidebar panel, context menus, hover providers (separate spec)
 - Copilot Chat `@jam /intel` participant (separate spec)
 - Additional language analyzers (Java, Go, Rust, C#, Ruby)
+- Additional framework profiles (Spring Boot, NestJS, FastAPI, Terraform, etc.)
 
 ### v3 — Community + Enterprise
 
-- Plugin API for custom analyzers
+- Plugin API for custom analyzers and framework profiles
 - Terraform/Kubernetes infrastructure mapping
 - Annotation layer (pin notes, tag ownership, save custom views)
 - Team sharing (export/import knowledge graphs)
