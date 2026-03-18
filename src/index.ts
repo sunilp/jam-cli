@@ -799,6 +799,72 @@ program
     });
   });
 
+// ── intel ─────────────────────────────────────────────────────────────────────
+const intel = program.command('intel').description('Codebase intelligence — analyze, query, visualize');
+
+intel.command('scan')
+  .description('Scan codebase and build knowledge graph')
+  .option('--no-enrich', 'Skip LLM enrichment')
+  .option('--enrich <depth>', 'Enrichment depth: shallow or deep')
+  .option('--dry-run', 'Show scan estimate without running')
+  .action(async (cmdOpts: Record<string, unknown>) => {
+    const g = globalOpts();
+    const { runIntelScan } = await import('./commands/intel.js');
+    // Commander sets enrich=false when --no-enrich is passed; map to noEnrich flag
+    const enrichVal = cmdOpts['enrich'];
+    await runIntelScan({
+      profile: g.profile,
+      provider: g.provider,
+      model: g.model,
+      baseUrl: g.baseUrl,
+      noColor: g.color === false,
+      noEnrich: enrichVal === false,
+      enrich: typeof enrichVal === 'string' ? enrichVal : undefined,
+      dryRun: cmdOpts['dryRun'] as boolean | undefined,
+    });
+  });
+
+intel.command('status')
+  .description('Show knowledge graph stats and enrichment progress')
+  .action(async () => {
+    const { runIntelStatus } = await import('./commands/intel.js');
+    await runIntelStatus();
+  });
+
+intel.command('query <text>')
+  .description('Query the knowledge graph')
+  .option('--no-ai', 'Use keyword search only (offline)')
+  .option('--mermaid', 'Output result as Mermaid diagram')
+  .action(async (text: string, cmdOpts: Record<string, unknown>) => {
+    const g = globalOpts();
+    const { runIntelQuery } = await import('./commands/intel.js');
+    await runIntelQuery(text, { profile: g.profile, provider: g.provider, model: g.model, baseUrl: g.baseUrl, noAi: cmdOpts['ai'] === false, mermaid: cmdOpts['mermaid'] as boolean | undefined });
+  });
+
+intel.command('impact <file>')
+  .description('Show impact analysis for a file')
+  .option('--mermaid', 'Output as Mermaid diagram')
+  .action(async (file: string, cmdOpts: Record<string, unknown>) => {
+    const { runIntelImpact } = await import('./commands/intel.js');
+    await runIntelImpact(file, { mermaid: cmdOpts['mermaid'] as boolean | undefined });
+  });
+
+intel.command('diagram')
+  .description('Generate architecture diagram')
+  .option('--type <type>', 'architecture, flow, deps, framework', 'architecture')
+  .option('-o, --output <file>', 'Output file path')
+  .action(async (cmdOpts: Record<string, unknown>) => {
+    const { runIntelDiagram } = await import('./commands/intel.js');
+    await runIntelDiagram({ type: cmdOpts['type'] as string | undefined, output: cmdOpts['output'] as string | undefined });
+  });
+
+intel.command('explore')
+  .description('Open knowledge graph in browser')
+  .action(async () => {
+    const { runIntelExplore } = await import('./commands/intel.js');
+    await runIntelExplore();
+  });
+
 // ── plugin ───────────────────────────────────────────────────────────────────
 const pluginCmd = program.command('plugin').description('Manage jam plugins');
 
