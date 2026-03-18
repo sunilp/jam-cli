@@ -41,7 +41,7 @@ export class IntelGraph {
     // Collect indices of edges that involve this node
     const toRemove = new Set<number>();
     for (let i = 0; i < this._edges.length; i++) {
-      const e = this._edges[i];
+      const e = this._edges[i]!;
       if (e.source === id || e.target === id) {
         toRemove.add(i);
       }
@@ -53,7 +53,7 @@ export class IntelGraph {
     for (let i = 0; i < this._edges.length; i++) {
       if (!toRemove.has(i)) {
         indexRemap.set(i, newEdges.length);
-        newEdges.push(this._edges[i]);
+        newEdges.push(this._edges[i]!);
       }
     }
     this._edges = newEdges;
@@ -98,13 +98,13 @@ export class IntelGraph {
   getEdgesFrom(nodeId: string): IntelEdge[] {
     const indices = this._outgoing.get(nodeId);
     if (!indices) return [];
-    return Array.from(indices).map(i => this._edges[i]);
+    return Array.from(indices).map(i => this._edges[i]!);
   }
 
   getEdgesTo(nodeId: string): IntelEdge[] {
     const indices = this._incoming.get(nodeId);
     if (!indices) return [];
-    return Array.from(indices).map(i => this._edges[i]);
+    return Array.from(indices).map(i => this._edges[i]!);
   }
 
   // ── Graph traversal ────────────────────────────────────────────────────────
