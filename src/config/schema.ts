@@ -80,6 +80,19 @@ export const JiraConfigSchema = z.object({
 }).optional();
 export type JiraConfig = z.infer<typeof JiraConfigSchema>;
 
+export const IntelConfigSchema = z.object({
+  enrichDepth: z.enum(['shallow', 'deep', 'none']).default('deep'),
+  maxTokenBudget: z.number().int().positive().default(500000),
+  storageDir: z.string().default('.jam/intel'),
+  autoScan: z.boolean().default(false),
+  excludePatterns: z.array(z.string()).default([
+    'node_modules', 'dist', '.git', 'vendor', '__pycache__', '.venv', 'target', 'build',
+  ]),
+  diagramFormat: z.literal('mermaid').default('mermaid'),
+  openBrowserOnScan: z.boolean().default(true),
+});
+export type IntelConfig = z.infer<typeof IntelConfigSchema>;
+
 export const JamConfigSchema = z.object({
   defaultProfile: z.string().default('default'),
   profiles: z.record(ProfileSchema).default({}),
@@ -107,6 +120,7 @@ export const JamConfigSchema = z.object({
   disabledPlugins: z.array(z.string()).optional(),
   /** Whether to prompt for @github/copilot CLI installation when not found (default: true). */
   copilotAutoInstall: z.boolean().default(true),
+  intel: IntelConfigSchema.default({}),
 });
 export type JamConfig = z.infer<typeof JamConfigSchema>;
 

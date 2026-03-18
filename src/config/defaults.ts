@@ -17,4 +17,13 @@ export const CONFIG_DEFAULTS: JamConfig = {
   cacheEnabled: true,
   cacheTtlSeconds: 3600,
   copilotAutoInstall: true,
+  intel: {
+    enrichDepth: 'deep',
+    maxTokenBudget: 500000,
+    storageDir: '.jam/intel',
+    autoScan: false,
+    excludePatterns: ['node_modules', 'dist', '.git', 'vendor', '__pycache__', '.venv', 'target', 'build'],
+    diagramFormat: 'mermaid',
+    openBrowserOnScan: true,
+  },
 };
