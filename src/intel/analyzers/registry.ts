@@ -1,5 +1,11 @@
 import { basename } from 'node:path';
 import type { AnalyzerPlugin } from './base.js';
+import { TypeScriptAnalyzer } from './typescript.js';
+import { PythonAnalyzer } from './python.js';
+import { CobolAnalyzer } from './cobol.js';
+import { SqlAnalyzer } from './sql.js';
+import { DockerAnalyzer } from './docker.js';
+import { OpenApiAnalyzer } from './openapi.js';
 
 export class AnalyzerRegistry {
   private plugins: AnalyzerPlugin[] = [];
@@ -28,4 +34,15 @@ export class AnalyzerRegistry {
   }
 
   getAll(): AnalyzerPlugin[] { return [...this.plugins]; }
+}
+
+export function createDefaultRegistry(): AnalyzerRegistry {
+  const registry = new AnalyzerRegistry();
+  registry.register(new TypeScriptAnalyzer());
+  registry.register(new PythonAnalyzer());
+  registry.register(new CobolAnalyzer());
+  registry.register(new SqlAnalyzer());
+  registry.register(new DockerAnalyzer());
+  registry.register(new OpenApiAnalyzer());
+  return registry;
 }
