@@ -52,16 +52,16 @@ describe('buildSandboxArgs', () => {
     expect(result.args).toContain('-m');
   });
 
-  it('returns passthrough for permissions-only (splits command into command + args)', () => {
+  it('returns shell wrapper for permissions-only', () => {
     const result = buildSandboxArgs('echo hello world', workspaceRoot, defaultConfig, 'permissions-only');
-    expect(result.command).toBe('echo');
-    expect(result.args).toEqual(['hello world']);
+    expect(result.command).toBe('/bin/sh');
+    expect(result.args).toEqual(['-c', 'echo hello world']);
   });
 
-  it('returns passthrough for permissions-only with no-arg command', () => {
+  it('returns shell wrapper for permissions-only with no-arg command', () => {
     const result = buildSandboxArgs('pwd', workspaceRoot, defaultConfig, 'permissions-only');
-    expect(result.command).toBe('pwd');
-    expect(result.args).toEqual([]);
+    expect(result.command).toBe('/bin/sh');
+    expect(result.args).toEqual(['-c', 'pwd']);
   });
 
   it('includes network deny in sandbox-exec profile when network is blocked', () => {

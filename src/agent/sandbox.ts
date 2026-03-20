@@ -99,14 +99,8 @@ export function buildSandboxArgs(
     }
 
     case 'permissions-only': {
-      // Split on first space: first word is the executable, the rest are args.
-      const spaceIdx = command.indexOf(' ');
-      if (spaceIdx === -1) {
-        return { command, args: [] };
-      }
-      const exe = command.slice(0, spaceIdx);
-      const rest = command.slice(spaceIdx + 1);
-      return { command: exe, args: [rest] };
+      // Run through shell for consistent behavior across platforms.
+      return { command: '/bin/sh', args: ['-c', command] };
     }
   }
 }
