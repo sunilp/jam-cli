@@ -210,6 +210,11 @@ echo "Explain recursion in one paragraph" | jam ask
 # From a file
 jam ask --file prompt.txt
 
+# Long context — pipe any content and ask about it
+cat design-doc.md | jam ask "what are the main trade-offs?"
+git log --since="1 week" -p | jam ask "summarize this week's changes"
+pbpaste | jam ask "review this code for bugs"
+
 # JSON output (full response + token usage)
 jam ask "What is 2+2?" --json
 
