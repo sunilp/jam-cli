@@ -66,7 +66,7 @@ export async function runGo(options: GoCommandOptions): Promise<void> {
 
     const mode = options.auto
       ? 'auto' as const
-      : (config.agent?.defaultMode ?? 'supervised') as 'supervised' | 'auto';
+      : (config.agent?.defaultMode ?? 'supervised');
     const maxWorkers = options.workers
       ? parseInt(options.workers, 10)
       : (config.agent?.maxWorkers ?? 3);
@@ -88,7 +88,8 @@ export async function runGo(options: GoCommandOptions): Promise<void> {
 
     rl.prompt();
 
-    rl.on('line', async (line) => {
+    rl.on('line', (line) => {
+      void (async () => {
       const input = line.trim();
       if (!input) { rl.prompt(); return; }
 
@@ -176,6 +177,7 @@ export async function runGo(options: GoCommandOptions): Promise<void> {
 
       process.stderr.write('\n');
       rl.prompt();
+      })();
     });
 
     rl.on('close', () => {

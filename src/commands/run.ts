@@ -148,7 +148,7 @@ export async function runRun(instruction: string | undefined, options: RunOption
     });
 
     const result = await orchestrator.execute(instruction, {
-      mode: mode as 'supervised' | 'auto',
+      mode,
       maxWorkers,
       images: options.image,
       signal: AbortSignal.timeout(600000), // 10 minutes
