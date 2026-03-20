@@ -1,8 +1,9 @@
 import { createInterface } from 'node:readline/promises';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { loadConfig, getActiveProfile } from '../config/loader.js';
 import { createProvider, blockIfNoToolSupport } from '../providers/factory.js';
-import { printError, printWarning, renderMarkdown } from '../ui/renderer.js';
+import { printError, printWarning, printJsonResult, renderMarkdown } from '../ui/renderer.js';
 import { JamError } from '../utils/errors.js';
 import { getWorkspaceRoot } from '../utils/workspace.js';
 import { ALL_TOOL_SCHEMAS, READONLY_TOOL_NAMES, executeTool } from '../tools/all-tools.js';
@@ -43,6 +44,16 @@ export interface RunOptions extends CliOverrides {
   quiet?: boolean;
   /** Auto-approve all write tool calls without prompting. */
   yes?: boolean;
+  /** Fully autonomous mode (implies --yes). */
+  auto?: boolean;
+  /** Max parallel workers for orchestrator. */
+  workers?: string;
+  /** Attach image file paths for multimodal input. */
+  image?: string[];
+  /** Disable OS sandbox. */
+  noSandbox?: boolean;
+  /** Read prompt from a file. */
+  file?: string;
 }
 
 async function confirmToolCall(
@@ -58,11 +69,126 @@ async function confirmToolCall(
 }
 
 export async function runRun(instruction: string | undefined, options: RunOptions): Promise<void> {
+  // Support --file: read prompt from file if no inline instruction
+  if (!instruction && options.file) {
+    try {
+      instruction = (await readFile(options.file, 'utf-8')).trim();
+    } catch {
+      await printError(`Cannot read file: ${options.file}`);
+      process.exit(1);
+    }
+  }
+
   if (!instruction) {
     await printError('Provide an instruction. Usage: jam run "<instruction>"');
     process.exit(1);
   }
 
+  // --auto implies --yes (auto-approve all writes)
+  if (options.auto) {
+    options.yes = true;
+  }
+
+  // Legacy mode: JAM_LEGACY_RUN=1 preserves the old agentic loop
+  if (process.env['JAM_LEGACY_RUN'] === '1') {
+    return legacyRun(instruction, options);
+  }
+
+  // ── New Orchestrator path (default) ──────────────────────────────────────
+  try {
+    const { Orchestrator } = await import('../agent/orchestrator.js');
+    const { createProgressReporter } = await import('../agent/progress.js');
+
+    const workspaceRoot = await getWorkspaceRoot();
+    const rawConfig = await loadConfig(process.cwd(), options);
+    const config = options.yes ? { ...rawConfig, toolPolicy: 'always' as const } : rawConfig;
+    const profile = getActiveProfile(config);
+    const adapter = await createProvider(profile);
+    blockIfNoToolSupport(adapter, 'run');
+
+    const stderrLog = options.quiet ? (_msg: string) => {} : (msg: string) => process.stderr.write(msg);
+
+    // Connect to MCP servers (non-fatal if any fail)
+    const mcpManager = await createMcpManager(config.mcpServers, stderrLog, config.mcpGroups);
+
+    stderrLog(`Starting task: ${instruction}\n`);
+    stderrLog(`Provider: ${profile.provider}, Model: ${profile.model ?? 'default'}\n`);
+
+    // Merge MCP tool schemas with built-in tools
+    const mcpSchemas = mcpManager.getToolSchemas();
+    const allToolSchemas = mcpSchemas.length > 0
+      ? [...ALL_TOOL_SCHEMAS, ...mcpSchemas]
+      : ALL_TOOL_SCHEMAS;
+
+    // Build tool execution bridge: MCP tools routed to mcpManager, built-in tools to executeTool
+    const executeToolBridge = async (name: string, args: Record<string, unknown>): Promise<string> => {
+      if (mcpManager.isOwnTool(name)) {
+        return mcpManager.executeTool(name, args);
+      }
+      // Use the existing executeTool from all-tools (handles both read + write)
+      return executeTool(name, args, workspaceRoot);
+    };
+
+    // Create progress reporter
+    const reporter = createProgressReporter({ quiet: options.quiet, json: options.json });
+
+    // Determine agent mode
+    const mode = options.auto ? 'auto' : (config.agent?.defaultMode ?? 'auto');
+
+    // Determine max workers
+    const maxWorkers = options.workers
+      ? parseInt(options.workers, 10)
+      : (config.agent?.maxWorkers ?? 3);
+
+    const orchestrator = new Orchestrator({
+      adapter,
+      workspaceRoot,
+      toolSchemas: allToolSchemas,
+      executeTool: executeToolBridge,
+    });
+
+    const result = await orchestrator.execute(instruction, {
+      mode,
+      maxWorkers,
+      images: options.image,
+      signal: AbortSignal.timeout(600000), // 10 minutes
+      onProgress: (event) => reporter.onEvent(event),
+    });
+
+    // Render result
+    if (options.json) {
+      printJsonResult({
+        response: result.summary,
+        usage: result.totalTokens
+          ? { promptTokens: result.totalTokens.promptTokens, completionTokens: result.totalTokens.completionTokens, totalTokens: result.totalTokens.totalTokens }
+          : undefined,
+      });
+    } else {
+      if (result.summary) {
+        try {
+          const rendered = await renderMarkdown(result.summary);
+          process.stdout.write(rendered);
+        } catch {
+          process.stdout.write(result.summary + '\n');
+        }
+      }
+
+      if (result.filesChanged.length > 0) {
+        stderrLog(`\nFiles changed: ${result.filesChanged.join(', ')}\n`);
+      }
+    }
+
+    await mcpManager.shutdown();
+    stderrLog('\nTask complete.\n');
+  } catch (err) {
+    const jamErr = JamError.fromUnknown(err);
+    await printError(jamErr.message, jamErr.hint);
+    process.exit(1);
+  }
+}
+
+/** Legacy agentic loop — preserved for JAM_LEGACY_RUN=1 fallback. */
+async function legacyRun(instruction: string, options: RunOptions): Promise<void> {
   try {
     const noColor = options.noColor ?? false;
     const stderrLog = options.quiet ? (_msg: string) => {} : (msg: string) => process.stderr.write(msg);

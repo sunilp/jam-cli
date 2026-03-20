@@ -29,3 +29,5 @@ export type {
 } from './types.js';
 export type { AnalyzerPlugin, FileAnalysis } from './analyzers/base.js';
 export { AnalyzerRegistry, createDefaultRegistry } from './analyzers/registry.js';
+export { analyzeConventions } from './conventions.js';
+export type { ConventionProfile } from './conventions.js';

@@ -1,0 +1,16 @@
+export * from './types.js';
+export { PermissionClassifier, classifyCommand, isHardBlocked, ApprovalTracker } from './permissions.js';
+export { detectSandboxStrategy, buildSandboxArgs, executeSandboxed } from './sandbox.js';
+export type { SandboxStrategy } from './sandbox.js';
+export { getTextContent, hasImages, flattenForProvider, loadImage } from './multimodal.js';
+export { FileLockManager } from './file-lock.js';
+export { ProviderPool } from './provider-pool.js';
+export type { ProviderLease } from './provider-pool.js';
+export { buildWorkspaceProfile, formatProfileForPrompt, computeProfileHash, loadCachedProfile } from './workspace-intel.js';
+export { generateTaskPlan, estimateTokenCost } from './planner.js';
+export { executeWorker } from './worker.js';
+export type { WorkerDeps } from './worker.js';
+export { Orchestrator } from './orchestrator.js';
+export type { OrchestratorDeps, OrchestratorOptions, OrchestratorResult, ProgressEvent } from './orchestrator.js';
+export { ProgressReporter, createProgressReporter } from './progress.js';
+export type { OutputMode } from './progress.js';

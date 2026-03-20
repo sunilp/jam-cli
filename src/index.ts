@@ -95,8 +95,12 @@ program
 // ── go ───────────────────────────────────────────────────────────────────────
 program
   .command('go')
-  .description('Interactive agent — reads, writes, and runs commands in your codebase')
+  .description('Interactive agent console — reads, writes, and runs commands in your codebase')
   .option('--name <name>', 'name for the session')
+  .option('--auto', 'fully autonomous mode (no confirmation prompts)')
+  .option('--workers <n>', 'max parallel workers for orchestrator')
+  .option('--image <path>', 'attach image(s) for multimodal input', collect)
+  .option('--no-sandbox', 'disable OS sandbox')
   .action(async (cmdOpts: Record<string, unknown>) => {
     const g = globalOpts();
     const { runGo } = await import('./commands/go.js');
@@ -106,14 +110,26 @@ program
       model: g.model,
       baseUrl: g.baseUrl,
       name: cmdOpts['name'] as string | undefined,
+      auto: cmdOpts['auto'] as boolean | undefined,
+      workers: cmdOpts['workers'] as string | undefined,
+      image: cmdOpts['image'] as string[] | undefined,
+      noSandbox: cmdOpts['sandbox'] === false,
     });
   });
 
 // ── run ───────────────────────────────────────────────────────────────────────
+function collect(val: string, memo: string[] = []) { memo.push(val); return memo; }
+
 program
   .command('run [instruction]')
   .description('Execute a task workflow using AI and local tools')
   .option('-y, --yes', 'auto-approve all write tool calls without prompting')
+  .option('--auto', 'fully autonomous mode (implies --yes)')
+  .option('--workers <n>', 'max parallel workers for orchestrator')
+  .option('--image <path>', 'attach image(s) for multimodal input', collect)
+  .option('--no-sandbox', 'disable OS sandbox')
+  .option('--file <path>', 'read prompt from file')
+  .option('--json', 'output result as JSON')
   .action(async (instruction: string | undefined, cmdOpts: Record<string, unknown>) => {
     const g = globalOpts();
     const { runRun } = await import('./commands/run.js');
@@ -125,6 +141,12 @@ program
       noColor: g.color === false,
       quiet: g.quiet,
       yes: cmdOpts['yes'] === true,
+      auto: cmdOpts['auto'] as boolean | undefined,
+      workers: cmdOpts['workers'] as string | undefined,
+      image: cmdOpts['image'] as string[] | undefined,
+      noSandbox: cmdOpts['sandbox'] === false,
+      file: cmdOpts['file'] as string | undefined,
+      json: cmdOpts['json'] as boolean | undefined,
     });
   });
 
