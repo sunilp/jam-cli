@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Orchestrator } from './orchestrator.js';
+import type { ProviderAdapter } from '../providers/base.js';
 
 // Mock all dependencies
 vi.mock('./workspace-intel.js', () => ({
@@ -45,7 +46,7 @@ const mockAdapter = {
   streamCompletion: vi.fn(),
   listModels: vi.fn(),
   chatWithTools: vi.fn(),
-} as any;
+} as unknown as ProviderAdapter;
 
 describe('Orchestrator', () => {
   it('executes a single-subtask plan', async () => {

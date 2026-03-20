@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ProviderPool } from './provider-pool.js';
+import type { ProviderAdapter } from '../providers/base.js';
 
 // Minimal mock adapter
 const mockAdapter = {
@@ -7,7 +8,7 @@ const mockAdapter = {
   validateCredentials: vi.fn(),
   streamCompletion: vi.fn(),
   listModels: vi.fn(),
-} as any;
+} as unknown as ProviderAdapter;
 
 describe('ProviderPool', () => {
   it('acquires and releases leases', async () => {

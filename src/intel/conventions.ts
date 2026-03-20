@@ -115,7 +115,7 @@ async function detectTooling(root: string): Promise<ToolingInfo> {
   const pkgText = await readTextFile(join(root, 'package.json'));
   if (pkgText) {
     let pkg: Record<string, unknown> = {};
-    try { pkg = JSON.parse(pkgText); } catch { /* ignore */ }
+    try { pkg = JSON.parse(pkgText) as Record<string, unknown>; } catch { /* ignore */ }
 
     const devDeps = (pkg.devDependencies ?? {}) as Record<string, string>;
     const deps = (pkg.dependencies ?? {}) as Record<string, string>;
@@ -249,7 +249,7 @@ function analyzeFileStyle(content: string): StyleVote {
 
     // Indentation
     if (line !== trimmed) {
-      const leadingWhitespace = line!.slice(0, line!.length - trimmed.length);
+      const leadingWhitespace = line.slice(0, line.length - trimmed.length);
       if (leadingWhitespace.includes('\t')) {
         vote.tabs++;
       } else {

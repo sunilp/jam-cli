@@ -66,29 +66,37 @@ Rules:
 
   // Parse JSON from response (may be wrapped in markdown code fences)
   const jsonStr = extractJSON(response.content);
-  let parsed: any;
+  let parsed: unknown;
   try {
     parsed = JSON.parse(jsonStr);
   } catch {
     throw new JamError('Planner returned invalid JSON', 'AGENT_PLAN_FAILED');
   }
 
-  // Build TaskPlan
-  const subtasks: Subtask[] = (parsed.subtasks ?? []).map((s: any) => ({
-    id: String(s.id),
-    description: String(s.description ?? ''),
-    files: (s.files ?? []).map((f: any) => ({
-      path: String(f.path),
-      mode: f.mode === 'create' || f.mode === 'modify' || f.mode === 'read-only'
-        ? f.mode : 'read-only',
-    })),
-    estimatedRounds: Number(s.estimatedRounds) || 10,
-    validationCommand: s.validationCommand ? String(s.validationCommand) : undefined,
-  }));
+  // Type guard for the parsed object
+  const obj = parsed as Record<string, unknown>;
 
+  // Build TaskPlan
+  const rawSubtasks = (Array.isArray(obj.subtasks) ? obj.subtasks : []) as Array<Record<string, unknown>>;
+  const subtasks: Subtask[] = rawSubtasks.map((s) => {
+    const rawFiles = (Array.isArray(s.files) ? s.files : []) as Array<Record<string, unknown>>;
+    return {
+      id: String(s.id),
+      description: String(s.description ?? ''),
+      files: rawFiles.map((f) => ({
+        path: String(f.path),
+        mode: f.mode === 'create' || f.mode === 'modify' || f.mode === 'read-only'
+          ? f.mode : 'read-only' as const,
+      })),
+      estimatedRounds: Number(s.estimatedRounds) || 10,
+      validationCommand: s.validationCommand ? String(s.validationCommand) : undefined,
+    };
+  });
+
+  const rawDeps = (obj.dependencies ?? {}) as Record<string, string[]>;
   const depGraph = new Map<string, string[]>();
   for (const st of subtasks) {
-    depGraph.set(st.id, parsed.dependencies?.[st.id] ?? []);
+    depGraph.set(st.id, rawDeps[st.id] ?? []);
   }
 
   // Validate DAG
@@ -102,7 +110,7 @@ Rules:
     );
   }
 
-  return { goal: String(parsed.goal ?? prompt), subtasks, dependencyGraph: depGraph };
+  return { goal: String(obj.goal ?? prompt), subtasks, dependencyGraph: depGraph };
 }
 
 /** Extract JSON from a string that may be wrapped in markdown code fences */

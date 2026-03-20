@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { executeWorker } from './worker.js';
 import type { WorkspaceProfile, Subtask, SubtaskContext } from './types.js';
+import type { ProviderAdapter, ChatWithToolsResponse } from '../providers/base.js';
 
 const mockProfile: WorkspaceProfile = {
   language: 'typescript', monorepo: false, srcLayout: 'src/',
@@ -28,19 +29,19 @@ const context: SubtaskContext = {
   planReminder: '',
 };
 
-function makeMockAdapter(responses: Array<{ content: string; toolCalls?: any[] }>) {
+function makeMockAdapter(responses: Array<Partial<ChatWithToolsResponse>>) {
   let callIndex = 0;
   return {
     info: { name: 'mock', supportsStreaming: true, supportsTools: true },
     validateCredentials: vi.fn(),
     streamCompletion: vi.fn(),
     listModels: vi.fn(),
-    chatWithTools: vi.fn().mockImplementation(async () => {
+    chatWithTools: vi.fn().mockImplementation(() => {
       const resp = responses[callIndex] ?? { content: 'Done', toolCalls: [] };
       callIndex++;
-      return { ...resp, usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150 } };
+      return Promise.resolve({ ...resp, usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150 } });
     }),
-  } as any;
+  } as unknown as ProviderAdapter;
 }
 
 describe('executeWorker', () => {
@@ -80,7 +81,7 @@ describe('executeWorker', () => {
   it('fails when exceeding round budget', async () => {
     // Always return tool calls — never completes
     const adapter = makeMockAdapter(
-      Array(15).fill({ content: 'Reading', toolCalls: [{ name: 'read_file', arguments: { path: 'src/a.ts' } }] }),
+      Array<Partial<ChatWithToolsResponse>>(15).fill({ content: 'Reading', toolCalls: [{ name: 'read_file', arguments: { path: 'src/a.ts' } }] }),
     );
     const subtaskShort = { ...subtask, estimatedRounds: 3 };
     const result = await executeWorker(subtaskShort, context, AbortSignal.timeout(5000), {
@@ -117,7 +118,7 @@ describe('executeWorker', () => {
       streamCompletion: vi.fn(),
       listModels: vi.fn(),
       // NO chatWithTools
-    } as any;
+    } as unknown as ProviderAdapter;
     const result = await executeWorker(subtask, context, AbortSignal.timeout(5000), {
       lease: { adapter, release: vi.fn() },
       workspaceRoot: '/workspace',
@@ -202,8 +203,10 @@ describe('executeWorker', () => {
       executeTool: vi.fn(),
     });
     // Verify the initial message included context
-    const firstCall = adapter.chatWithTools.mock.calls[0];
-    const messages = firstCall[0] as Array<{ content: string }>;
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    const mockChatWithTools = adapter.chatWithTools as unknown as { mock: { calls: Array<Array<Array<{ content: string }>>> } };
+    const firstCall = mockChatWithTools.mock.calls[0];
+    const messages = firstCall[0];
     expect(messages[0].content).toContain('Created the model file');
     expect(messages[0].content).toContain('src/model.ts');
     expect(messages[0].content).toContain('barrel exports');

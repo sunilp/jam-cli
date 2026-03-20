@@ -1,6 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, type Mock } from 'vitest';
 import { generateTaskPlan, estimateTokenCost } from './planner.js';
 import type { WorkspaceProfile, TaskPlan } from './types.js';
+import type { ProviderAdapter } from '../providers/base.js';
 
 const mockProfile: WorkspaceProfile = {
   language: 'typescript', monorepo: false, srcLayout: 'src/',
@@ -25,7 +26,7 @@ const makeAdapter = (responseContent: string) => ({
     content: responseContent,
     toolCalls: [],
   }),
-} as any);
+} as unknown as ProviderAdapter);
 
 describe('generateTaskPlan', () => {
   it('parses a valid single-subtask plan', async () => {
@@ -76,7 +77,7 @@ describe('generateTaskPlan', () => {
   it('throws AGENT_PLAN_FAILED on empty response', async () => {
     const adapter = makeAdapter('');
     // chatWithTools returns empty content
-    adapter.chatWithTools.mockResolvedValue({ content: '', toolCalls: [] });
+    (adapter.chatWithTools as unknown as Mock).mockResolvedValue({ content: '', toolCalls: [] });
     await expect(generateTaskPlan(adapter, 'test', mockProfile)).rejects.toThrow('AGENT_PLAN_FAILED');
   });
 

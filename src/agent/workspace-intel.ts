@@ -115,7 +115,7 @@ async function detectFramework(root: string): Promise<string | undefined> {
   const pkgText = await readTextFile(join(root, 'package.json'));
   if (pkgText) {
     let pkg: Record<string, unknown> = {};
-    try { pkg = JSON.parse(pkgText); } catch { /* ignore */ }
+    try { pkg = JSON.parse(pkgText) as Record<string, unknown>; } catch { /* ignore */ }
     const deps = {
       ...((pkg.dependencies ?? {}) as Record<string, string>),
       ...((pkg.devDependencies ?? {}) as Record<string, string>),
@@ -229,8 +229,6 @@ export async function buildWorkspaceProfile(
   // Layer 2: structural data
   let framework: string | undefined;
   let entryPoints: string[] = [];
-  let srcLayout: string;
-  let monorepo: boolean;
 
   // Try intel graph first
   const graphPath = join(root, '.jam', 'intel', 'graph.json');
@@ -258,8 +256,8 @@ export async function buildWorkspaceProfile(
   }
 
   // These are always detected statically (graph doesn't encode them directly)
-  srcLayout = await detectSrcLayout(root);
-  monorepo = await detectMonorepo(root);
+  const srcLayout = await detectSrcLayout(root);
+  const monorepo = await detectMonorepo(root);
 
   const profile: WorkspaceProfile = {
     ...conventions,

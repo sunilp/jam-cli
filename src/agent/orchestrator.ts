@@ -1,17 +1,16 @@
-import type { ProviderAdapter, TokenUsage } from '../providers/base.js';
-import type { TaskPlan, WorkerResult, WorkspaceProfile, AgentMode, TokenBudget } from './types.js';
+import type { ProviderAdapter, TokenUsage, ToolDefinition } from '../providers/base.js';
+import type { TaskPlan, WorkerResult, AgentMode } from './types.js';
 import { topologicalSort } from './types.js';
 import { generateTaskPlan, estimateTokenCost } from './planner.js';
 import { buildWorkspaceProfile } from './workspace-intel.js';
-import { executeWorker, type WorkerDeps } from './worker.js';
+import { executeWorker } from './worker.js';
 import { FileLockManager } from './file-lock.js';
 import { ProviderPool } from './provider-pool.js';
-import { JamError } from '../utils/errors.js';
 
 export interface OrchestratorDeps {
   adapter: ProviderAdapter;
   workspaceRoot: string;
-  toolSchemas: any[];
+  toolSchemas: ToolDefinition[];
   executeTool: (name: string, args: Record<string, unknown>) => Promise<string>;
 }
 
@@ -56,7 +55,7 @@ export class Orchestrator {
     options.onProgress?.({ type: 'plan-ready', message: `Plan: ${plan.goal} (${plan.subtasks.length} subtasks)` });
 
     // 3. Estimate token cost
-    const estimatedCost = estimateTokenCost(plan);
+    const _estimatedCost = estimateTokenCost(plan);
 
     // 4. Set up infrastructure
     const pool = new ProviderPool(adapter, options.maxWorkers);
@@ -73,7 +72,7 @@ export class Orchestrator {
     const completedSummaries = new Map<string, string>(); // subtaskId -> summary
 
     // Track round estimates for adaptive adjustment
-    let estimateDrift = 1.0; // multiplier
+    const _estimateDrift = 1.0; // multiplier
 
     // 6. Dispatch workers respecting dependencies
     for (const subtaskId of order) {

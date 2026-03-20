@@ -1,6 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { Orchestrator } from './orchestrator.js';
 import type { ProgressEvent } from './orchestrator.js';
+import type { ProviderAdapter } from '../providers/base.js';
+import type { Subtask, SubtaskContext } from './types.js';
 
 // Mock workspace-intel to avoid filesystem dependency
 vi.mock('./workspace-intel.js', () => ({
@@ -42,17 +44,17 @@ vi.mock('./planner.js', () => ({
 }));
 
 // Mock worker to simulate completing subtasks
-let workerCallCount = 0;
+let _workerCallCount = 0;
 vi.mock('./worker.js', () => ({
-  executeWorker: vi.fn().mockImplementation(async (subtask) => {
-    workerCallCount++;
-    return {
+  executeWorker: vi.fn().mockImplementation((subtask: Subtask) => {
+    _workerCallCount++;
+    return Promise.resolve({
       subtaskId: subtask.id,
       status: 'completed',
       filesChanged: [{ path: subtask.files[0]?.path ?? 'unknown', action: 'created', diff: '' }],
       summary: `Completed subtask ${subtask.id}: ${subtask.description}`,
       tokensUsed: { promptTokens: 200, completionTokens: 100, totalTokens: 300 },
-    };
+    });
   }),
 }));
 
@@ -62,11 +64,11 @@ const mockAdapter = {
   streamCompletion: vi.fn(),
   listModels: vi.fn(),
   chatWithTools: vi.fn(),
-} as any;
+} as unknown as ProviderAdapter;
 
 describe('Agent Engine Integration', () => {
   beforeEach(() => {
-    workerCallCount = 0;
+    _workerCallCount = 0;
     vi.clearAllMocks();
   });
 
@@ -128,7 +130,8 @@ describe('Agent Engine Integration', () => {
     await orch.execute('test', { mode: 'auto', maxWorkers: 1 });
 
     // Second worker call should have received context from first
-    const calls = (executeWorker as any).mock.calls;
+    const mockFn = executeWorker as unknown as Mock;
+    const calls = mockFn.mock.calls as Array<[Subtask, SubtaskContext, ...unknown[]]>;
     expect(calls).toHaveLength(2);
 
     // Second call's context should reference subtask 1's output

@@ -1,4 +1,4 @@
-import type { ProviderAdapter, Message, TokenUsage } from '../providers/base.js';
+import type { Message, TokenUsage, ToolDefinition } from '../providers/base.js';
 import type { Subtask, SubtaskContext, WorkerResult, FileChange, WorkspaceProfile } from './types.js';
 import type { ProviderLease } from './provider-pool.js';
 import { WorkingMemory } from '../utils/memory.js';
@@ -10,7 +10,7 @@ export interface WorkerDeps {
   lease: ProviderLease;          // from ProviderPool.acquire()
   workspaceRoot: string;
   workspaceProfile: WorkspaceProfile;
-  toolSchemas: any[];            // tool definitions for chatWithTools
+  toolSchemas: ToolDefinition[];  // tool definitions for chatWithTools
   executeTool: (name: string, args: Record<string, unknown>) => Promise<string>;
 }
 

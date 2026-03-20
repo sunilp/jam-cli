@@ -14,7 +14,7 @@ export function getTextContent(msg: AgentMessage): string {
   if (typeof msg.content === 'string') {
     return msg.content;
   }
-  return (msg.content as ContentPart[])
+  return msg.content
     .filter((part): part is ContentPart & { type: 'text'; text: string } =>
       part.type === 'text' && part.text !== undefined
     )
@@ -29,7 +29,7 @@ export function hasImages(msg: AgentMessage): boolean {
   if (typeof msg.content === 'string') {
     return false;
   }
-  return (msg.content as ContentPart[]).some(part => part.type === 'image');
+  return msg.content.some(part => part.type === 'image');
 }
 
 /**
