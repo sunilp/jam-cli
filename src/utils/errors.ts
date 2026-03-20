@@ -13,7 +13,17 @@ export type ErrorCode =
   | 'TOOL_DENIED'
   | 'TOOL_NOT_FOUND'
   | 'TOOL_EXEC_ERROR'
-  | 'UNKNOWN';
+  | 'UNKNOWN'
+  | 'AGENT_PLAN_FAILED'
+  | 'AGENT_PLAN_CYCLE'
+  | 'AGENT_WORKER_TIMEOUT'
+  | 'AGENT_WORKER_CANCELLED'
+  | 'AGENT_FILE_LOCK_CONFLICT'
+  | 'AGENT_FILE_LOCK_TIMEOUT'
+  | 'AGENT_BUDGET_EXCEEDED'
+  | 'AGENT_SANDBOX_UNAVAILABLE'
+  | 'AGENT_RATE_LIMITED'
+  | 'AGENT_MERGE_CONFLICT';
 
 /**
  * Actionable hints for each error code.
@@ -64,6 +74,26 @@ export const ERROR_HINTS: Partial<Record<ErrorCode, string>> = {
   TOOL_EXEC_ERROR:
     'A tool failed to execute. Check that git and other dependencies are installed.\n' +
     'Run `jam doctor` for diagnostics.',
+  AGENT_PLAN_FAILED:
+    'The AI could not generate a valid execution plan. Try simplifying your task or breaking it into smaller pieces.',
+  AGENT_PLAN_CYCLE:
+    'The execution plan has circular dependencies. This is a bug — please report it.',
+  AGENT_WORKER_TIMEOUT:
+    'A worker exceeded its round budget. Try increasing maxRoundsPerWorker in config.',
+  AGENT_WORKER_CANCELLED:
+    'Worker was cancelled. This may be due to a dependency failure or user abort.',
+  AGENT_FILE_LOCK_CONFLICT:
+    'Two workers tried to edit the same file simultaneously. The orchestrator resolved the conflict.',
+  AGENT_FILE_LOCK_TIMEOUT:
+    'A file lock request timed out. Another worker may be stuck.',
+  AGENT_BUDGET_EXCEEDED:
+    'Token budget exceeded. Reduce task scope or increase maxTotal in agent config.',
+  AGENT_SANDBOX_UNAVAILABLE:
+    'OS sandbox not available. Running with permissions-only. Run jam doctor to check.',
+  AGENT_RATE_LIMITED:
+    'Provider rate limit hit. Workers paused automatically. Wait and retry.',
+  AGENT_MERGE_CONFLICT:
+    'Workers produced conflicting file edits. Manual resolution may be needed.',
 };
 
 export class JamError extends Error {
