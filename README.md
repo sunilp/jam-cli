@@ -37,17 +37,21 @@ Ask questions · Trace call graphs · Review diffs · Generate patches · Run ag
 
 ---
 
-> ### What's New in v0.7.0
+> ### What's New in v0.9.0 — Agent Engine
 >
-> **`jam git` toolkit** — 5 zero-LLM git productivity commands. `jam git wtf` explains repo state in plain English (detached HEAD? mid-rebase? diverged?), `jam git undo` detects your last operation and shows the safe undo, `jam git cleanup` prunes merged/stale branches, `jam git standup` shows your commits across all branches, `jam git oops` is a quick-reference for 10 common git mistakes.
+> **`jam go` — Interactive agent console.** Type tasks, get results, give feedback. Parallel workers, workspace intelligence, session memory. Like Claude Code, but provider-agnostic.
 >
-> **Enterprise ready** — HTTP proxy support (`HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`), custom CA certificates (`tlsCaPath`), configurable request timeouts (`requestTimeoutMs`). Works behind corporate firewalls and SSL-inspecting proxies.
+> **`jam run` — One-shot autonomous agent.** Decomposes tasks into subtasks, dispatches parallel workers, merges results. Great for CI/CD and scripts.
 >
-> **Security hardening** — Path traversal protection in all file tools (read, write, list), symlink escape detection, API key redaction in logs, MCP tool schema validation, npm vulnerability fixes.
+> **Orchestrator with parallel workers** — Tasks are decomposed into subtasks with a dependency graph. Independent subtasks run in parallel (up to 3 workers). File-lock protocol prevents conflicts. Deadlock detection built in.
 >
-> **Embedded provider graduated** — No longer experimental. Smart guardrails block complex commands (diff, review, commit, run, patch, verify) with helpful "use a bigger model" messages. Simple Q&A and explanations work great.
+> **Workspace Intelligence** — Before writing any code, the agent profiles your project: code style, test patterns, naming conventions, frameworks, git conventions. Cached in `.jam/workspace-profile.json`. Code the agent writes matches your existing patterns.
 >
-> **19 zero-LLM utilities** — All the v0.6 utilities plus the git toolkit. [Full docs](docs/utilities.md)
+> **Tiered permissions + OS sandbox** — Commands classified as safe/moderate/dangerous. Safe commands auto-approve, dangerous commands always confirm. OS-level sandbox (`sandbox-exec` on macOS, `unshare`/`firejail` on Linux) restricts filesystem access to workspace.
+>
+> **Multimodal image input** — `--image screenshot.png` passes images to vision-capable models. Works with OpenAI, Anthropic, Gemini, and Ollama vision models.
+>
+> **New flags:** `--auto` (fully autonomous), `--workers <n>`, `--image <path>`, `--no-sandbox`, `--file <path>`
 
 ---
 
@@ -493,34 +497,87 @@ jam patch "Remove unused imports" --yes                      # auto-confirm appl
 
 ---
 
+### `jam go`
+
+Interactive agent console. Type tasks, get autonomous execution with feedback.
+
+```bash
+jam go                                    # start interactive session
+jam go --auto                             # fully autonomous mode
+jam go --workers 5                        # more parallel workers
+jam go --image mockup.png                 # pass image context
+```
+
+**Inside the console:**
+```
+jam> Add a REST API for user management with tests
+--- Plan: Add user API (3 subtasks) ---
+[Worker 1] Starting: Create user model
+[Worker 1] Done: Created src/models/user.ts
+[Worker 2] Starting: Create API routes
+[Worker 2] Done: Created src/routes/users.ts
+[Worker 3] Starting: Write tests
+[Worker 3] Done: Created src/routes/users.test.ts
+[3/3 subtasks complete | 4,200 tokens]
+
+Files changed: src/models/user.ts, src/routes/users.ts, src/routes/users.test.ts
+
+jam> /status
+Mode: supervised | Workers: 3
+
+jam> /exit
+```
+
+**Commands:** `/stop` (cancel current task), `/status`, `/help`, `/exit`
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--auto` | Fully autonomous (no confirmations except dangerous ops) |
+| `--workers <n>` | Max parallel workers (default: 3) |
+| `--image <path>` | Attach image for vision models (repeatable) |
+| `--no-sandbox` | Disable OS-level command sandbox |
+
+---
+
 ### `jam run`
 
-Agentic task workflow using a **structured plan-then-execute** loop. The model first generates a typed `ExecutionPlan` with ordered steps and success criteria, then executes each step with full safety enforcement.
+One-shot autonomous agent. Decomposes tasks into subtasks, dispatches parallel workers, exits when done. Ideal for CI/CD and scripts.
 
 ```bash
 jam run "Find all TODO comments and summarize them"
-jam run "Check git status and explain what's changed"
-jam run "Read src/config.ts and identify any security issues"
-jam run "Add input validation to the login handler"   # involves writes
-jam run --yes "Rename all occurrences of userId to accountId"  # auto-approve writes
+jam run "Add input validation to the login handler"
+jam run --auto "Rename all occurrences of userId to accountId"
+jam run --image screenshot.png "Fix the layout bug shown here"
+jam run --file task.txt --workers 5       # read task from file, 5 workers
+jam run --yes "Refactor auth module"      # auto-approve writes (legacy flag)
 ```
 
 **Options:**
 
 | Flag | Description |
 |------|-------------|
-| `--yes` | Auto-approve all write tool confirmations (non-interactive) |
+| `--auto` | Fully autonomous mode (implies `--yes`) |
+| `--yes` / `-y` | Auto-approve write tool calls |
+| `--workers <n>` | Max parallel workers (default: 3) |
+| `--image <path>` | Attach image for vision models (repeatable) |
+| `--file <path>` | Read task prompt from file |
+| `--no-sandbox` | Disable OS-level command sandbox |
+| `--json` | Structured JSON output with per-worker results |
 | `--model <id>` | Override model for this task |
 | `--provider <name>` | Override provider |
 | `--profile <name>` | Use a named config profile |
 
 **How it works:**
 
-1. **Plan** — model generates an ordered list of steps (read → understand → write) with explicit success criteria
-2. **Execute** — each step runs in sequence; read-only results are cached to avoid redundant calls
-3. **Read-before-write gate** — write tools are automatically blocked until the target file has been read first, preventing silent overwrites of unread files
-4. **Shrinkage guard** — if a `write_file` produces a file suspiciously smaller than the original, the write is auto-reverted and the model is redirected
-5. **Critic pass** — after the loop completes, a critic evaluates the result and injects a correction if quality is insufficient
+1. **Profile** — scans your project for conventions (code style, test patterns, frameworks) and caches the result
+2. **Plan** — decomposes the task into subtasks with a dependency graph (DAG-validated, no cycles)
+3. **Dispatch** — launches workers in topological order; independent subtasks run in parallel
+4. **Execute** — each worker runs a focused agentic loop: read → think → write → verify
+5. **Safety** — tiered permissions (safe/moderate/dangerous), OS sandbox, read-before-write gate, shrinkage guard
+6. **Merge** — collects results, resolves file conflicts, runs validation commands
+7. **Report** — summary of changes, files modified, token usage
 
 **Available tools (model-callable):**
 
