@@ -26,7 +26,7 @@ export class ProgressReporter {
       case 'plan-ready': {
         // Extract total from message
         const match = event.message.match(/(\d+) subtasks/);
-        if (match) this.total = parseInt(match[1], 10);
+        if (match?.[1]) this.total = parseInt(match[1], 10);
         this.write(`\n${this.formatPlanReady(event.message)}\n`);
         break;
       }

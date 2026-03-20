@@ -26,4 +26,11 @@ export const CONFIG_DEFAULTS: JamConfig = {
     diagramFormat: 'mermaid',
     openBrowserOnScan: true,
   },
+  agent: {
+    maxWorkers: 3,
+    defaultMode: 'supervised',
+    maxRoundsPerWorker: 20,
+    permissions: { safe: [], dangerous: [] },
+    sandbox: { filesystem: 'workspace-only', network: 'allowed', timeout: 60000 },
+  },
 };

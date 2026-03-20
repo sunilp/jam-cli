@@ -109,7 +109,7 @@ Rules:
 function extractJSON(text: string): string {
   // Try to find JSON in code fences
   const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-  if (fenceMatch) return fenceMatch[1].trim();
+  if (fenceMatch?.[1]) return fenceMatch[1].trim();
 
   // Try to find raw JSON object
   const objMatch = text.match(/\{[\s\S]*\}/);

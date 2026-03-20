@@ -239,7 +239,7 @@ function analyzeFileStyle(content: string): StyleVote {
   };
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+    const line = lines[i]!;
     const trimmed = line.trimStart();
 
     // Skip empty lines and comment lines
@@ -249,7 +249,7 @@ function analyzeFileStyle(content: string): StyleVote {
 
     // Indentation
     if (line !== trimmed) {
-      const leadingWhitespace = line.slice(0, line.length - trimmed.length);
+      const leadingWhitespace = line!.slice(0, line!.length - trimmed.length);
       if (leadingWhitespace.includes('\t')) {
         vote.tabs++;
       } else {
@@ -290,7 +290,7 @@ function analyzeFileStyle(content: string): StyleVote {
 
     // Trailing commas — lines ending with , followed by } or ] on next line
     if (stripped.endsWith(',') && i + 1 < lines.length) {
-      const nextTrimmed = lines[i + 1].trim();
+      const nextTrimmed = lines[i + 1]!.trim();
       if (nextTrimmed.startsWith('}') || nextTrimmed.startsWith(']') || nextTrimmed.startsWith(')')) {
         vote.trailingCommaCount++;
       }
