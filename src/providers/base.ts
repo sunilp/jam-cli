@@ -67,6 +67,11 @@ export interface ProviderInfo {
    * on small/embedded models. Undefined means no enforced limit.
    */
   contextWindow?: number;
+  /**
+   * Whether this provider supports vision (image) inputs.
+   * Defaults to false when absent.
+   */
+  supportsVision?: boolean;
 }
 
 export interface ProviderAdapter {

@@ -93,6 +93,25 @@ export const IntelConfigSchema = z.object({
 });
 export type IntelConfig = z.infer<typeof IntelConfigSchema>;
 
+const AgentPermissionsSchema = z.object({
+  safe: z.array(z.string()).default([]),
+  dangerous: z.array(z.string()).default([]),
+});
+
+const AgentSandboxSchema = z.object({
+  filesystem: z.enum(['workspace-only', 'unrestricted']).default('workspace-only'),
+  network: z.enum(['allowed', 'blocked']).default('allowed'),
+  timeout: z.number().int().positive().default(60000),
+});
+
+export const AgentConfigSchema = z.object({
+  maxWorkers: z.number().int().min(1).max(10).default(3),
+  defaultMode: z.enum(['supervised', 'auto']).default('supervised'),
+  maxRoundsPerWorker: z.number().int().min(1).max(50).default(20),
+  permissions: AgentPermissionsSchema.default({}),
+  sandbox: AgentSandboxSchema.default({}),
+});
+
 export const JamConfigSchema = z.object({
   defaultProfile: z.string().default('default'),
   profiles: z.record(ProfileSchema).default({}),
@@ -121,6 +140,7 @@ export const JamConfigSchema = z.object({
   /** Whether to prompt for @github/copilot CLI installation when not found (default: true). */
   copilotAutoInstall: z.boolean().default(true),
   intel: IntelConfigSchema.default({}),
+  agent: AgentConfigSchema.default({}),
 });
 export type JamConfig = z.infer<typeof JamConfigSchema>;
 
