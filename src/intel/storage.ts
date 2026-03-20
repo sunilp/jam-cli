@@ -1,6 +1,7 @@
 // src/intel/storage.ts
 
-import { readFile, writeFile, mkdir, unlink, readdir } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import { readFile, writeFile, mkdir, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { IntelGraph } from './graph.js';
 import type { SerializedGraph, SerializedEnrichment, SemanticMetadata, EnrichDepth } from './types.js';
@@ -118,12 +119,7 @@ export function checkGitignore(rootDir: string): boolean {
   // Synchronous read — intentional to keep the API simple for a quick status check
   let content: string;
   try {
-    // Use synchronous fs here via a dynamic require pattern — but we avoid require in ESM.
-    // Instead, read synchronously using the lower-level approach.
-    // We use readFileSync from 'node:fs' (not node:fs/promises)
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const fs = require('node:fs') as typeof import('node:fs');
-    content = fs.readFileSync(join(rootDir, '.gitignore'), 'utf-8');
+    content = readFileSync(join(rootDir, '.gitignore'), 'utf-8');
   } catch {
     return false;
   }

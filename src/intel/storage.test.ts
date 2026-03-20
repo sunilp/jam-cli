@@ -43,7 +43,7 @@ describe('saveGraph / loadGraph', () => {
 
     const content = await readFile(join(dir, '.jam', 'intel', 'graph.json'), 'utf-8');
     expect(content).toBeTruthy();
-    const parsed = JSON.parse(content);
+    const parsed = JSON.parse(content) as { version: number; nodes: unknown[] };
     expect(parsed.version).toBe(1);
     expect(parsed.nodes.length).toBe(2);
   });
@@ -122,7 +122,7 @@ describe('saveMermaid', () => {
 });
 
 describe('checkGitignore', () => {
-  it('returns false when .gitignore does not exist', async () => {
+  it('returns false when .gitignore does not exist', () => {
     const dir = join(tmpDir, 'no-gitignore');
     expect(checkGitignore(dir)).toBe(false);
   });

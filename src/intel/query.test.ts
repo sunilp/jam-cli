@@ -88,9 +88,10 @@ describe('falls back to offline mode', () => {
   it('when chatWithTools is unavailable on provider', async () => {
     const providerWithoutTools: ProviderAdapter = {
       info: { name: 'mock', supportsStreaming: true },
-      validateCredentials: async () => {},
-      listModels: async () => [],
+      validateCredentials: () => Promise.resolve(),
+      listModels: () => Promise.resolve([]),
       streamCompletion: async function* () {
+        await Promise.resolve();
         yield { delta: '', done: true };
       },
       // No chatWithTools
@@ -105,10 +106,10 @@ describe('falls back to offline mode', () => {
   it('when noAi option is true', async () => {
     const providerWithTools: ProviderAdapter = {
       info: { name: 'mock', supportsStreaming: true },
-      validateCredentials: async () => {},
-      listModels: async () => [],
-      streamCompletion: async function* () { yield { delta: '', done: true }; },
-      chatWithTools: async () => ({ content: 'AI response', toolCalls: [] }),
+      validateCredentials: () => Promise.resolve(),
+      listModels: () => Promise.resolve([]),
+      streamCompletion: async function* () { await Promise.resolve(); yield { delta: '', done: true }; },
+      chatWithTools: () => Promise.resolve({ content: 'AI response', toolCalls: [] }),
     } as unknown as ProviderAdapter;
 
     const graph = makeGraph();
@@ -122,10 +123,10 @@ describe('falls back to offline mode', () => {
   it('falls back to offline when chatWithTools throws', async () => {
     const failingProvider: ProviderAdapter = {
       info: { name: 'mock', supportsStreaming: true },
-      validateCredentials: async () => {},
-      listModels: async () => [],
-      streamCompletion: async function* () { yield { delta: '', done: true }; },
-      chatWithTools: async () => { throw new Error('API error'); },
+      validateCredentials: () => Promise.resolve(),
+      listModels: () => Promise.resolve([]),
+      streamCompletion: async function* () { await Promise.resolve(); yield { delta: '', done: true }; },
+      chatWithTools: () => { throw new Error('API error'); },
     } as unknown as ProviderAdapter;
 
     const graph = makeGraph();
@@ -151,10 +152,10 @@ describe('NL query with mocked chatWithTools', () => {
 
     const aiProvider: ProviderAdapter = {
       info: { name: 'mock', supportsStreaming: true },
-      validateCredentials: async () => {},
-      listModels: async () => [],
-      streamCompletion: async function* () { yield { delta: '', done: true }; },
-      chatWithTools: async () => mockChatWithToolsResponse,
+      validateCredentials: () => Promise.resolve(),
+      listModels: () => Promise.resolve([]),
+      streamCompletion: async function* () { await Promise.resolve(); yield { delta: '', done: true }; },
+      chatWithTools: () => Promise.resolve(mockChatWithToolsResponse),
     } as unknown as ProviderAdapter;
 
     const result = await query('find auth module', graph, emptyEnrichment, aiProvider, {});
@@ -175,10 +176,10 @@ describe('NL query with mocked chatWithTools', () => {
 
     const aiProvider: ProviderAdapter = {
       info: { name: 'mock', supportsStreaming: true },
-      validateCredentials: async () => {},
-      listModels: async () => [],
-      streamCompletion: async function* () { yield { delta: '', done: true }; },
-      chatWithTools: async () => mockResponse,
+      validateCredentials: () => Promise.resolve(),
+      listModels: () => Promise.resolve([]),
+      streamCompletion: async function* () { await Promise.resolve(); yield { delta: '', done: true }; },
+      chatWithTools: () => Promise.resolve(mockResponse),
     } as unknown as ProviderAdapter;
 
     const result = await query('list all tables', graph, emptyEnrichment, aiProvider, {});
@@ -199,10 +200,10 @@ describe('NL query with mocked chatWithTools', () => {
 
     const aiProvider: ProviderAdapter = {
       info: { name: 'mock', supportsStreaming: true },
-      validateCredentials: async () => {},
-      listModels: async () => [],
-      streamCompletion: async function* () { yield { delta: '', done: true }; },
-      chatWithTools: async () => mockResponse,
+      validateCredentials: () => Promise.resolve(),
+      listModels: () => Promise.resolve([]),
+      streamCompletion: async function* () { await Promise.resolve(); yield { delta: '', done: true }; },
+      chatWithTools: () => Promise.resolve(mockResponse),
     } as unknown as ProviderAdapter;
 
     const result = await query('what does auth depend on', graph, emptyEnrichment, aiProvider, {});
@@ -223,10 +224,10 @@ describe('NL query with mocked chatWithTools', () => {
 
     const aiProvider: ProviderAdapter = {
       info: { name: 'mock', supportsStreaming: true },
-      validateCredentials: async () => {},
-      listModels: async () => [],
-      streamCompletion: async function* () { yield { delta: '', done: true }; },
-      chatWithTools: async () => mockResponse,
+      validateCredentials: () => Promise.resolve(),
+      listModels: () => Promise.resolve([]),
+      streamCompletion: async function* () { await Promise.resolve(); yield { delta: '', done: true }; },
+      chatWithTools: () => Promise.resolve(mockResponse),
     } as unknown as ProviderAdapter;
 
     const result = await query('impact of changing auth', graph, emptyEnrichment, aiProvider, {});
@@ -247,10 +248,10 @@ describe('NL query with mocked chatWithTools', () => {
 
     const aiProvider: ProviderAdapter = {
       info: { name: 'mock', supportsStreaming: true },
-      validateCredentials: async () => {},
-      listModels: async () => [],
-      streamCompletion: async function* () { yield { delta: '', done: true }; },
-      chatWithTools: async () => mockResponse,
+      validateCredentials: () => Promise.resolve(),
+      listModels: () => Promise.resolve([]),
+      streamCompletion: async function* () { await Promise.resolve(); yield { delta: '', done: true }; },
+      chatWithTools: () => Promise.resolve(mockResponse),
     } as unknown as ProviderAdapter;
 
     const result = await query('auth', graph, emptyEnrichment, aiProvider, { mermaid: true });
@@ -270,10 +271,10 @@ describe('NL query with mocked chatWithTools', () => {
 
     const aiProvider: ProviderAdapter = {
       info: { name: 'mock', supportsStreaming: true },
-      validateCredentials: async () => {},
-      listModels: async () => [],
-      streamCompletion: async function* () { yield { delta: '', done: true }; },
-      chatWithTools: async () => mockResponse,
+      validateCredentials: () => Promise.resolve(),
+      listModels: () => Promise.resolve([]),
+      streamCompletion: async function* () { await Promise.resolve(); yield { delta: '', done: true }; },
+      chatWithTools: () => Promise.resolve(mockResponse),
     } as unknown as ProviderAdapter;
 
     const result = await query('auth', graph, emptyEnrichment, aiProvider, {});

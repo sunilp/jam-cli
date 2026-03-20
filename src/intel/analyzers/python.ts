@@ -7,7 +7,7 @@ const RELATIVE_IMPORT_RE = /^(?:from\s+(\.[\w.]*)\s+import|import\s+(\.[\w.]*))/
 // Class definition
 const CLASS_RE = /^class\s+(\w+)\s*(?:\(([^)]*)\))?:/gm;
 // Function definition (top-level and class methods)
-const FUNC_RE = /^(?:    )?def\s+(\w+)\s*\(/gm;
+const FUNC_RE = /^(?: {4})?def\s+(\w+)\s*\(/gm;
 
 // Flask route: @app.route('/path') or @blueprint.route('/path', methods=[...])
 const FLASK_ROUTE_RE = /@(?:\w+)\.route\s*\(\s*['"]([^'"]+)['"]\s*(?:,\s*methods\s*=\s*\[([^\]]*)\])?\s*\)/g;
@@ -29,7 +29,7 @@ const SPARK_IMPORT_RE = /from\s+pyspark|import\s+pyspark|SparkSession/g;
 // os.environ / os.getenv config access
 const OS_ENV_RE = /os\.environ\s*\[\s*['"]([^'"]+)['"]\s*\]|os\.getenv\s*\(\s*['"]([^'"]+)['"]/g;
 
-function extractMethods(lines: string[], classStartLine: number): Array<{ name: string; line: number }> {
+function _extractMethods(lines: string[], classStartLine: number): Array<{ name: string; line: number }> {
   const methods: Array<{ name: string; line: number }> = [];
   // Look for indented def inside class body
   for (let i = classStartLine + 1; i < lines.length; i++) {
@@ -110,7 +110,7 @@ export class PythonAnalyzer implements AnalyzerPlugin {
       if (sqlaClasses.has(className)) {
         // SQLAlchemy model → table node
         // Find column names
-        const classStartIdx = content.lastIndexOf('\n', classMatch.index);
+        const _classStartIdx = content.lastIndexOf('\n', classMatch.index);
         const classLineNum = content.slice(0, classMatch.index).split('\n').length;
         const classLines = lines.slice(classLineNum - 1);
         const columns: string[] = [];

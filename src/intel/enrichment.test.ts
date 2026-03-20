@@ -1,6 +1,6 @@
 // src/intel/enrichment.test.ts
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { EnrichmentEngine } from './enrichment.js';
 import { IntelGraph } from './graph.js';
 import type { ProviderAdapter } from '../providers/base.js';
@@ -27,9 +27,10 @@ function makeGraph(): IntelGraph {
 function makeMockProvider(responseJson: string): ProviderAdapter {
   return {
     info: { name: 'mock', supportsStreaming: true },
-    validateCredentials: async () => {},
-    listModels: async () => [],
+    validateCredentials: () => Promise.resolve(),
+    listModels: () => Promise.resolve([]),
     streamCompletion: async function* () {
+      await Promise.resolve();
       yield { delta: responseJson, done: true };
     },
   } as unknown as ProviderAdapter;
@@ -257,9 +258,10 @@ describe('EnrichmentEngine.enrichAll', () => {
     let callCount = 0;
     const failingProvider: ProviderAdapter = {
       info: { name: 'mock', supportsStreaming: true },
-      validateCredentials: async () => {},
-      listModels: async () => [],
+      validateCredentials: () => Promise.resolve(),
+      listModels: () => Promise.resolve([]),
       streamCompletion: async function* () {
+        await Promise.resolve();
         callCount++;
         if (callCount === 2) {
           // Second node throws

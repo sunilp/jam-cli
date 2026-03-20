@@ -60,11 +60,11 @@ export async function runIntelScan(options: IntelScanOptions): Promise<void> {
 
   // Open in browser if configured
   if (intelConfig.openBrowserOnScan) {
-    const { writeFile } = await import('node:fs/promises');
-    const { join, dirname } = await import('node:path');
+    const fsPromises = await import('node:fs/promises');
+    const nodePath = await import('node:path');
     const htmlContent = generateViewerHtml(mermaid, mmdPath);
-    const htmlPath = join(dirname(mmdPath), 'viewer.html');
-    await writeFile(htmlPath, htmlContent);
+    const htmlPath = nodePath.join(nodePath.dirname(mmdPath), 'viewer.html');
+    await fsPromises.writeFile(htmlPath, htmlContent);
     await openInBrowser(htmlPath);
     console.log(chalk.green('🌐 Opened in browser'));
   }
@@ -173,13 +173,13 @@ export async function runIntelQuery(text: string, options: { noAi?: boolean; mer
 export async function runIntelImpact(file: string, options: { mermaid?: boolean }): Promise<void> {
   const { loadGraph, generateImpactDiagram } = await import('../intel/index.js');
   const { getWorkspaceRoot } = await import('../utils/workspace.js');
-  const { relative } = await import('node:path');
+  const nodePath = await import('node:path');
 
   const rootDir = await getWorkspaceRoot();
   const graph = await loadGraph(rootDir);
   if (!graph) { console.log(chalk.yellow('No graph. Run `jam intel scan` first.')); return; }
 
-  const relFile = relative(rootDir, file).replace(/\\/g, '/');
+  const relFile = nodePath.relative(rootDir, file).replace(/\\/g, '/');
   const nodeId = `file:${relFile}`;
   const node = graph.getNode(nodeId);
   if (!node) { console.log(chalk.yellow(`Node not found: ${nodeId}`)); return; }
@@ -232,8 +232,8 @@ export async function runIntelDiagram(options: { type?: string; output?: string 
 export async function runIntelExplore(): Promise<void> {
   const { loadGraph, generateArchitectureDiagram, saveMermaid, generateViewerHtml, openInBrowser } = await import('../intel/index.js');
   const { getWorkspaceRoot } = await import('../utils/workspace.js');
-  const { writeFile } = await import('node:fs/promises');
-  const { join, dirname } = await import('node:path');
+  const fsPromises = await import('node:fs/promises');
+  const nodePath = await import('node:path');
 
   const rootDir = await getWorkspaceRoot();
   const graph = await loadGraph(rootDir);
@@ -242,8 +242,8 @@ export async function runIntelExplore(): Promise<void> {
   const mermaid = generateArchitectureDiagram(graph);
   const mmdPath = await saveMermaid(mermaid, rootDir);
   const htmlContent = generateViewerHtml(mermaid, mmdPath);
-  const htmlPath = join(dirname(mmdPath), 'viewer.html');
-  await writeFile(htmlPath, htmlContent);
+  const htmlPath = nodePath.join(nodePath.dirname(mmdPath), 'viewer.html');
+  await fsPromises.writeFile(htmlPath, htmlContent);
   await openInBrowser(htmlPath);
   console.log(chalk.green('🌐 Explorer opened in browser'));
 }

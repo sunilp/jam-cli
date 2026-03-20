@@ -134,7 +134,7 @@ describe('Scanner', () => {
     const graph2 = await scanner.scan(rootDir, { previousGraph: graph1 });
 
     // Node counts should be similar (incremental may be equal or very close)
-    const nodeCount1 = graph1.nodeCount;
+    const _nodeCount1 = graph1.nodeCount;
     const nodeCount2 = graph2.nodeCount;
     // Allow small difference due to incremental edge copying logic
     expect(nodeCount2).toBeGreaterThan(0);

@@ -61,16 +61,16 @@ export class OpenApiAnalyzer implements AnalyzerPlugin {
     let inPaths = false;
     let inComponents = false;
     let inDefinitions = false;
-    let pathsIndent = -1;
+    let _pathsIndent = -1;
     let currentPath: string | null = null;
-    let currentPathIndent = -1;
-    let componentsIndent = -1;
+    let _currentPathIndent = -1;
+    let _componentsIndent = -1;
     let schemasIndent = -1;
 
     // Schema $ref tracking for depends-on edges
     // We need to track which schema is currently being defined
     let currentSchema: string | null = null;
-    let currentSchemaIndent = -1;
+    let _currentSchemaIndent = -1;
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i]!;
@@ -87,8 +87,8 @@ export class OpenApiAnalyzer implements AnalyzerPlugin {
         inPaths = key === 'paths';
         inComponents = key === 'components';
         inDefinitions = key === 'definitions';
-        pathsIndent = inPaths ? 0 : -1;
-        componentsIndent = inComponents ? 0 : -1;
+        _pathsIndent = inPaths ? 0 : -1;
+        _componentsIndent = inComponents ? 0 : -1;
         currentPath = null;
         currentSchema = null;
         schemasIndent = -1;
@@ -100,7 +100,7 @@ export class OpenApiAnalyzer implements AnalyzerPlugin {
         // A path entry: key starts with '/' at indent=2
         if (indent === 2 && key.startsWith('/')) {
           currentPath = key;
-          currentPathIndent = indent;
+          _currentPathIndent = indent;
           continue;
         }
 
@@ -132,7 +132,7 @@ export class OpenApiAnalyzer implements AnalyzerPlugin {
         // Schema name at indent=4 under schemas:
         if (schemasIndent !== -1 && indent === 4) {
           currentSchema = key;
-          currentSchemaIndent = indent;
+          _currentSchemaIndent = indent;
           const schemaId = `schema:${key}`;
           // Only create node if not already there
           if (!nodes.find(n => n.id === schemaId)) {
@@ -153,7 +153,7 @@ export class OpenApiAnalyzer implements AnalyzerPlugin {
       if (inDefinitions) {
         if (indent === 2) {
           currentSchema = key;
-          currentSchemaIndent = indent;
+          _currentSchemaIndent = indent;
           const schemaId = `schema:${key}`;
           if (!nodes.find(n => n.id === schemaId)) {
             nodes.push({

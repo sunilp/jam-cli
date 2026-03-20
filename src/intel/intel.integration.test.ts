@@ -228,7 +228,7 @@ describe('impact analysis traces dependencies', () => {
 
     const impacted = graph.getImpactSubgraph(usersNode.id);
     // app.ts imports users router — should be in impacted set
-    const impactedPaths = impacted.map(n => n.filePath ?? n.name);
+    const _impactedPaths = impacted.map(n => n.filePath ?? n.name);
     // At minimum the impact subgraph is defined (may be empty if no imports were resolved)
     expect(Array.isArray(impacted)).toBe(true);
   });

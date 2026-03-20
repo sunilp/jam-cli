@@ -5,7 +5,7 @@ import { join, relative, extname, basename } from 'node:path';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { IntelGraph } from './graph.js';
-import { AnalyzerRegistry, createDefaultRegistry } from './analyzers/registry.js';
+import { type AnalyzerRegistry, createDefaultRegistry } from './analyzers/registry.js';
 import { detectFrameworks } from './frameworks/detector.js';
 
 const execAsync = promisify(exec);

@@ -10,7 +10,7 @@ const COMPOSE_FILENAMES = new Set([
 ]);
 
 // FROM image:tag (handles multi-stage: FROM image AS alias)
-const FROM_RE = /^FROM\s+(\S+?)(?:\s+AS\s+\S+)?\s*$/im;
+const _FROM_RE = /^FROM\s+(\S+?)(?:\s+AS\s+\S+)?\s*$/im;
 const FROM_ALL_RE = /^FROM\s+(\S+?)(?:\s+AS\s+\S+)?\s*$/gim;
 
 // EXPOSE port
@@ -65,7 +65,7 @@ function parseComposeServices(content: string): Map<string, ServiceBlock> {
     }
 
     // Service name: exactly 2-space or 4-space indent with key:
-    const serviceMatch = /^  (\w[\w-]*)\s*:/.exec(trimmed);
+    const serviceMatch = /^ {2}(\w[\w-]*)\s*:/.exec(trimmed);
     if (serviceMatch && !/^\s{4}/.test(trimmed)) {
       // Save previous service
       if (currentService && currentBlock) {
@@ -82,7 +82,7 @@ function parseComposeServices(content: string): Map<string, ServiceBlock> {
     if (!currentService || !currentBlock) continue;
 
     // Keys within a service (4-space indent)
-    const keyMatch = /^    (\w[\w_-]*)\s*:(.*)/.exec(trimmed);
+    const keyMatch = /^ {4}(\w[\w_-]*)\s*:(.*)/.exec(trimmed);
     if (keyMatch) {
       const key = keyMatch[1]!.toLowerCase();
       const value = keyMatch[2]!.trim();
@@ -94,14 +94,14 @@ function parseComposeServices(content: string): Map<string, ServiceBlock> {
         currentBlock.image = value;
       } else if (inDependsOn && value) {
         // inline: depends_on: [svcA, svcB]
-        const inlineItems = value.replace(/[\[\]]/g, '').split(',').map(s => s.trim()).filter(Boolean);
+        const inlineItems = value.replace(/[[\]]/g, '').split(',').map(s => s.trim()).filter(Boolean);
         currentBlock.dependsOn.push(...inlineItems);
       }
       continue;
     }
 
     // List items under a service key (6-space indent)
-    const listItemMatch = /^      -\s+(.+)/.exec(trimmed);
+    const listItemMatch = /^ {6}-\s+(.+)/.exec(trimmed);
     if (listItemMatch) {
       const item = listItemMatch[1]!.trim().replace(/^['"]|['"]$/g, '');
       if (inDependsOn) currentBlock.dependsOn.push(item);
