@@ -13,7 +13,7 @@ export class CopilotProxyBackend extends OpenAIAdapter {
   override readonly info: ProviderInfo = {
     name: 'copilot',
     supportsStreaming: true,
-    supportsTools: false,
+    supportsTools: true,
   };
 
   constructor(options: { baseUrl: string; model?: string; requestTimeoutMs?: number; tlsCaPath?: string }) {

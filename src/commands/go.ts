@@ -7,7 +7,7 @@
 
 import * as readline from 'node:readline';
 import { loadConfig, getActiveProfile } from '../config/loader.js';
-import { createProvider } from '../providers/factory.js';
+import { createProvider, blockIfNoToolSupport } from '../providers/factory.js';
 import { Orchestrator } from '../agent/orchestrator.js';
 import { createProgressReporter } from '../agent/progress.js';
 import { ALL_TOOL_SCHEMAS, executeTool as executeBuiltinTool } from '../tools/all-tools.js';
@@ -36,6 +36,7 @@ export async function runGo(options: GoCommandOptions): Promise<void> {
     const config = await loadConfig(process.cwd(), cliOverrides);
     const profile = getActiveProfile(config);
     const adapter = await createProvider(profile);
+    await blockIfNoToolSupport(adapter, 'go');
     const workspaceRoot = await getWorkspaceRoot(process.cwd());
 
     // MCP setup

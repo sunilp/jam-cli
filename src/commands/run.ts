@@ -104,7 +104,7 @@ export async function runRun(instruction: string | undefined, options: RunOption
     const config = options.yes ? { ...rawConfig, toolPolicy: 'always' as const } : rawConfig;
     const profile = getActiveProfile(config);
     const adapter = await createProvider(profile);
-    blockIfNoToolSupport(adapter, 'run');
+    await blockIfNoToolSupport(adapter, 'run');
 
     const stderrLog = options.quiet ? (_msg: string) => {} : (msg: string) => process.stderr.write(msg);
 
@@ -197,7 +197,7 @@ async function legacyRun(instruction: string, options: RunOptions): Promise<void
     const config = options.yes ? { ...rawConfig, toolPolicy: 'always' as const } : rawConfig;
     const profile = getActiveProfile(config);
     const adapter = await createProvider(profile);
-    blockIfNoToolSupport(adapter, 'run');
+    await blockIfNoToolSupport(adapter, 'run');
 
     // Connect to MCP servers (non-fatal if any fail)
     const mcpManager = await createMcpManager(config.mcpServers, stderrLog, config.mcpGroups);

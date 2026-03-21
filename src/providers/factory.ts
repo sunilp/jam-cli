@@ -29,9 +29,11 @@ export function inferProviderFromModel(model: string): string | null {
 
 /**
  * Commands that require tool calling should call this after creating the adapter.
- * If the provider does not support tools, prints a helpful message and exits.
+ * Triggers credential validation first so lazy-init adapters (e.g. CopilotAdapter)
+ * resolve their backend before the capability check.
  */
-export function blockIfNoToolSupport(adapter: ProviderAdapter, command: string): void {
+export async function blockIfNoToolSupport(adapter: ProviderAdapter, command: string): Promise<void> {
+  await adapter.validateCredentials();
   if (adapter.info?.supportsTools === false) {
     process.stderr.write(
       `\n  The ${adapter.info.name} provider cannot handle "${command}" — it requires tool calling and complex reasoning.\n` +

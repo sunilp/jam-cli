@@ -29,7 +29,7 @@ describe('CopilotProxyBackend', () => {
     const backend = new CopilotProxyBackend({ baseUrl: BASE_URL });
     expect(backend.info.name).toBe('copilot');
     expect(backend.info.supportsStreaming).toBe(true);
-    expect(backend.info.supportsTools).toBe(false);
+    expect(backend.info.supportsTools).toBe(true);
   });
 
   it('validates credentials via /health endpoint', async () => {

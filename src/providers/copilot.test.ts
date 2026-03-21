@@ -43,7 +43,7 @@ describe('CopilotAdapter dispatcher', () => {
     const { CopilotAdapter } = await import('./copilot.js');
     const adapter = new CopilotAdapter({ baseUrl: BASE_URL });
     await adapter.validateCredentials();
-    expect(adapter.info.supportsTools).toBe(false);
+    expect(adapter.info.supportsTools).toBe(true);
   });
 
   it('streams via proxy backend', async () => {
@@ -77,21 +77,27 @@ describe('CopilotAdapter dispatcher', () => {
     });
   });
 
-  it('throws when chatWithTools called on proxy backend', async () => {
+  it('chatWithTools works via proxy backend', async () => {
     server.use(
-      http.get(`${BASE_URL}/health`, () => HttpResponse.json({ status: 'ok' }))
+      http.get(`${BASE_URL}/health`, () => HttpResponse.json({ status: 'ok' })),
+      http.post(`${BASE_URL}/v1/chat/completions`, () => {
+        return HttpResponse.json({
+          id: 'c',
+          choices: [{ message: { role: 'assistant', content: 'done' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+        });
+      })
     );
 
     const { CopilotAdapter } = await import('./copilot.js');
     const adapter = new CopilotAdapter({ baseUrl: BASE_URL });
     await adapter.validateCredentials();
 
-    await expect(
-      adapter.chatWithTools(
-        [{ role: 'user', content: 'test' }],
-        [{ name: 'test', description: 'test', parameters: { type: 'object', properties: {}, required: [] } }]
-      )
-    ).rejects.toMatchObject({ code: 'PROVIDER_UNAVAILABLE' });
+    const result = await adapter.chatWithTools(
+      [{ role: 'user', content: 'test' }],
+      [{ name: 'test', description: 'test', parameters: { type: 'object', properties: {}, required: [] } }]
+    );
+    expect(result.content).toBe('done');
   });
 
   it('dispose is safe when no backend', async () => {
