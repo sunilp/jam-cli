@@ -1,7 +1,13 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { CopilotProxyBackend } from './copilot-proxy-backend.js';
 import { createMockCopilotServer } from './copilot-mock-server.js';
 import type { ToolDefinition } from './base.js';
+import type * as CopilotSdkBackendModule from './copilot-sdk-backend.js';
+
+vi.mock('./copilot-sdk-backend.js', async () => {
+  const actual = await vi.importActual<typeof CopilotSdkBackendModule>('./copilot-sdk-backend.js');
+  return { ...actual, isCopilotCliAvailable: vi.fn().mockResolvedValue(false) };
+});
 
 // ── Block 1: tool calling ─────────────────────────────────────────────────────
 
@@ -122,5 +128,96 @@ describe('CopilotProxyBackend integration (text response)', () => {
     expect(response.usage!.promptTokens).toBe(10);
     expect(response.usage!.completionTokens).toBe(7);
     expect(response.usage!.totalTokens).toBe(17);
+  });
+});
+
+// ── Block 3: CopilotAdapter proxy fallback + tool calling ─────────────────────
+
+describe('CopilotAdapter integration (proxy fallback + tool calling)', () => {
+  let port: number;
+  const mockServer = createMockCopilotServer('tool_calls');
+
+  beforeAll(async () => {
+    port = await mockServer.start();
+  });
+
+  afterAll(async () => {
+    await mockServer.stop();
+  });
+
+  it('validates credentials successfully via proxy backend', async () => {
+    const { CopilotAdapter } = await import('./copilot.js');
+    const adapter = new CopilotAdapter({ baseUrl: `http://127.0.0.1:${port}` });
+    await expect(adapter.validateCredentials()).resolves.toBeUndefined();
+  });
+
+  it('reports supportsTools as true after proxy backend init', async () => {
+    const { CopilotAdapter } = await import('./copilot.js');
+    const adapter = new CopilotAdapter({ baseUrl: `http://127.0.0.1:${port}` });
+    await adapter.validateCredentials();
+    expect(adapter.info.supportsTools).toBe(true);
+  });
+
+  it('returns parsed tool calls via chatWithTools through proxy backend', async () => {
+    const { CopilotAdapter } = await import('./copilot.js');
+    const adapter = new CopilotAdapter({ baseUrl: `http://127.0.0.1:${port}` });
+
+    const tools: ToolDefinition[] = [
+      {
+        name: 'list_dir',
+        description: 'List files in a directory',
+        parameters: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: 'Directory path to list' },
+          },
+          required: ['path'],
+        },
+      },
+    ];
+
+    const response = await adapter.chatWithTools(
+      [{ role: 'user', content: 'List the current directory' }],
+      tools
+    );
+
+    expect(response.toolCalls).toBeDefined();
+    expect(response.toolCalls).toHaveLength(1);
+
+    const toolCall = response.toolCalls![0]!;
+    expect(toolCall.name).toBe('list_dir');
+    expect(toolCall.id).toBe('call_abc123');
+    expect(toolCall.arguments).toEqual({ path: '.' });
+
+    expect(response.content).toBeNull();
+  });
+});
+
+// ── Block 4: blockIfNoToolSupport with lazy-init CopilotAdapter ───────────────
+
+describe('blockIfNoToolSupport with lazy-init CopilotAdapter', () => {
+  let port: number;
+  const mockServer = createMockCopilotServer('tool_calls');
+
+  beforeAll(async () => {
+    port = await mockServer.start();
+  });
+
+  afterAll(async () => {
+    await mockServer.stop();
+  });
+
+  it('does not block the CopilotAdapter for the "run" command', async () => {
+    const { CopilotAdapter } = await import('./copilot.js');
+    const { blockIfNoToolSupport } = await import('./factory.js');
+    const adapter = new CopilotAdapter({ baseUrl: `http://127.0.0.1:${port}` });
+    await expect(blockIfNoToolSupport(adapter, 'run')).resolves.toBeUndefined();
+  });
+
+  it('does not block the CopilotAdapter for the "go" command', async () => {
+    const { CopilotAdapter } = await import('./copilot.js');
+    const { blockIfNoToolSupport } = await import('./factory.js');
+    const adapter = new CopilotAdapter({ baseUrl: `http://127.0.0.1:${port}` });
+    await expect(blockIfNoToolSupport(adapter, 'go')).resolves.toBeUndefined();
   });
 });
