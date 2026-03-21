@@ -182,12 +182,21 @@ export async function runRun(instruction: string | undefined, options: RunOption
     stderrLog('\nTask complete.\n');
   } catch (err) {
     const jamErr = JamError.fromUnknown(err);
+
+    // If the planner failed (model can't produce structured JSON), fall back
+    // to the legacy agentic loop which doesn't require a structured plan.
+    if (jamErr.code === 'AGENT_PLAN_FAILED') {
+      const stderrLog = options.quiet ? (_msg: string) => {} : (msg: string) => process.stderr.write(msg);
+      stderrLog('Planner could not generate a structured plan — falling back to agentic loop.\n');
+      return legacyRun(instruction, options);
+    }
+
     await printError(jamErr.message, jamErr.hint);
     process.exit(1);
   }
 }
 
-/** Legacy agentic loop — preserved for JAM_LEGACY_RUN=1 fallback. */
+/** Legacy agentic loop — fallback when orchestrator planner fails. */
 async function legacyRun(instruction: string, options: RunOptions): Promise<void> {
   try {
     const noColor = options.noColor ?? false;
@@ -270,6 +279,8 @@ async function legacyRun(instruction: string, options: RunOptions): Promise<void
     const readFiles = new Set<string>();
     // Track original line counts of files that were auto-read before write
     const originalLineCounts = new Map<string, number>();
+    // Track per-file write count to detect wasted iterations
+    const fileWriteCounts = new Map<string, number>();
     const stepVerifier = new StepVerifier();
 
     // Merge MCP tool schemas with built-in tools
@@ -302,7 +313,7 @@ async function legacyRun(instruction: string, options: RunOptions): Promise<void
     };
 
     // Agentic loop
-    const MAX_ITERATIONS = 15;
+    const MAX_ITERATIONS = 25;
     let synthesisInjected = false;
     stderrLog(formatSeparator('Working', noColor));
 
@@ -480,6 +491,29 @@ async function legacyRun(instruction: string, options: RunOptions): Promise<void
               ? `\n\nResume execution plan at Step ${structuredPlan.steps[currentStepIdx]!.id}.`
               : '';
             messages.push({ role: 'user', content: buildCriticCorrection(verdict, instruction) + stepHint });
+            continue;
+          }
+        }
+
+        // ── Completeness check for write tasks ─────────────────────────────
+        // If files were written, verify all requested components exist before
+        // declaring done. If components are missing and we have iterations left,
+        // nudge the model to create them.
+        if (tracker.wasToolCalled('write_file') && iteration < MAX_ITERATIONS - 2) {
+          const writtenFiles = Array.from(fileWriteCounts.keys());
+          const missing = detectMissingComponents(instruction, writtenFiles);
+          if (missing.length > 0) {
+            stderrLog(formatInternalStatus(`Completeness: missing ${missing.join(', ')} — continuing`, noColor) + '\n');
+            messages.push({ role: 'assistant', content: finalText });
+            messages.push({
+              role: 'user',
+              content: [
+                `[COMPLETENESS CHECK] You created files but the following requested components are still missing:`,
+                ...missing.map(m => `- ${m}`),
+                ``,
+                `Create each missing component now using \`write_file\`. Do NOT repeat files you already created.`,
+              ].join('\n'),
+            });
             continue;
           }
         }
@@ -674,6 +708,23 @@ async function legacyRun(instruction: string, options: RunOptions): Promise<void
           }
         }
 
+        // ── Duplicate write nudge ──────────────────────────────────────
+        // If the model has written the same file 3+ times, nudge it to move on.
+        if (!wasError && tc.name === 'write_file' && typeof tc.arguments['path'] === 'string') {
+          const wPath = tc.arguments['path'] as string;
+          fileWriteCounts.set(wPath, (fileWriteCounts.get(wPath) ?? 0) + 1);
+          if (fileWriteCounts.get(wPath)! >= 3) {
+            stderrLog(formatInternalStatus(
+              `Nudge: ${wPath} written ${fileWriteCounts.get(wPath)} times — moving on`,
+              noColor,
+            ) + '\n');
+            messages.push({
+              role: 'user',
+              content: `[PROGRESS NUDGE] You have written \`${wPath}\` ${fileWriteCounts.get(wPath)} times. The file is done. Move on to the NEXT component that hasn't been created yet. Check which files from the original task are still missing and create them now.`,
+            });
+          }
+        }
+
         stderrLog(formatToolResult(cappedOutput, noColor) + '\n');
         tracker.record(tc.name, tc.arguments, wasError);
         messages.push({ role: 'user', content: `[Tool result: ${tc.name}]\n${cappedOutput}` });
@@ -700,4 +751,35 @@ async function legacyRun(instruction: string, options: RunOptions): Promise<void
     await printError(jamErr.message, jamErr.hint);
     process.exit(1);
   }
+}
+
+/**
+ * Detect components requested in the instruction that are missing from the written files.
+ * Uses keyword matching against common code artifact types.
+ */
+function detectMissingComponents(instruction: string, writtenFiles: string[]): string[] {
+  const lower = instruction.toLowerCase();
+  const files = writtenFiles.map(f => f.toLowerCase()).join(' ');
+  const missing: string[] = [];
+
+  const checks: Array<{ keywords: string[]; filePattern: RegExp; label: string }> = [
+    { keywords: ['controller'], filePattern: /controller/i, label: 'REST controller' },
+    { keywords: ['test', 'spec'], filePattern: /test|spec/i, label: 'test class' },
+    { keywords: ['application.properties', 'application.yml'], filePattern: /application\.(properties|yml|yaml)/i, label: 'application.properties' },
+    { keywords: ['service'], filePattern: /service/i, label: 'service class' },
+    { keywords: ['model', 'entity', 'record', 'dto'], filePattern: /model|entity|dto|record/i, label: 'model/record class' },
+    { keywords: ['repository', 'dao'], filePattern: /repository|dao/i, label: 'repository' },
+    { keywords: ['config', 'configuration'], filePattern: /config/i, label: 'configuration class' },
+    { keywords: ['pom.xml', 'build.gradle'], filePattern: /pom\.xml|build\.gradle/i, label: 'build file' },
+  ];
+
+  for (const check of checks) {
+    const mentioned = check.keywords.some(kw => lower.includes(kw));
+    const created = check.filePattern.test(files);
+    if (mentioned && !created) {
+      missing.push(check.label);
+    }
+  }
+
+  return missing;
 }
