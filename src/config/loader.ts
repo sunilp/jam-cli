@@ -116,6 +116,58 @@ async function loadXdgUserConfig(): Promise<Partial<JamConfig>> {
   return parsed.data;
 }
 
+/** Cache for Copilot CLI availability check (avoids repeating npx call). */
+let _copilotCliCache: boolean | undefined;
+
+async function isCopilotCliInstalled(): Promise<boolean> {
+  if (_copilotCliCache !== undefined) return _copilotCliCache;
+  try {
+    const { execFileSync } = await import('node:child_process');
+    execFileSync('npx', ['@github/copilot', '--version'], {
+      timeout: 15_000,
+      stdio: 'pipe',
+    });
+    _copilotCliCache = true;
+  } catch {
+    _copilotCliCache = false;
+  }
+  return _copilotCliCache;
+}
+
+/**
+ * Detect the best available provider when none is explicitly configured.
+ * Priority: VSCode Copilot proxy > Copilot CLI > Anthropic > OpenAI > null (keep ollama default)
+ */
+async function detectBestProvider(): Promise<{ provider: string; model?: string } | null> {
+  // 1. VSCode Copilot proxy (JAM_VSCODE_LM_PORT)
+  if (process.env['JAM_VSCODE_LM_PORT']) {
+    return { provider: 'copilot' };
+  }
+
+  // 2. Copilot CLI (@github/copilot)
+  if (process.env['JAM_COPILOT_CLI_AVAILABLE'] === '1' || await isCopilotCliInstalled()) {
+    return { provider: 'copilot' };
+  }
+
+  // 3. Anthropic API key
+  if (process.env['ANTHROPIC_API_KEY']) {
+    return { provider: 'anthropic' };
+  }
+
+  // 4. OpenAI API key
+  if (process.env['OPENAI_API_KEY']) {
+    return { provider: 'openai' };
+  }
+
+  // 5. Groq API key
+  if (process.env['GROQ_API_KEY']) {
+    return { provider: 'groq' };
+  }
+
+  // No better provider found — keep ollama default
+  return null;
+}
+
 export async function loadConfig(
   cwd: string = process.cwd(),
   cliOverrides: CliOverrides = {}
@@ -170,29 +222,33 @@ export async function loadConfig(
     config = { ...config, defaultProfile: profileName };
   }
 
-  // Auto-detect Copilot provider from VSCode terminal env var.
-  // Only activate when no explicit provider has been configured anywhere.
-  if (process.env['JAM_VSCODE_LM_PORT']) {
-    const activeProfileName = config.defaultProfile;
-    const activeProfile = config.profiles[activeProfileName];
-    if (activeProfile && activeProfile.provider === 'ollama') {
-      // Check if provider was explicitly set by user (config file or CLI),
-      // vs just being the default. If CLI overrides set a provider, it was
-      // already applied above. If a config file set it, the merge would have
-      // changed it from the default. So if it's still 'ollama' and no
-      // cliOverrides.provider was passed, it's the untouched default.
-      const providerExplicitlySet =
-        cliOverrides.provider !== undefined ||
-        (repoConfig.profiles?.[activeProfileName] as Record<string, unknown> | undefined)?.provider !== undefined ||
-        (dotJamConfig.profiles?.[activeProfileName] as Record<string, unknown> | undefined)?.provider !== undefined ||
-        (xdgConfig.profiles?.[activeProfileName] as Record<string, unknown> | undefined)?.provider !== undefined;
+  // ── Smart provider auto-detection ────────────────────────────────────
+  // When no provider was explicitly configured (still on default 'ollama'),
+  // detect the best available provider automatically.
+  // Priority: VSCode Copilot proxy > Copilot CLI > Anthropic API > OpenAI API > Ollama
+  const activeProfileName = config.defaultProfile;
+  const activeProfile = config.profiles[activeProfileName];
+  if (activeProfile && activeProfile.provider === 'ollama') {
+    const providerExplicitlySet =
+      cliOverrides.provider !== undefined ||
+      (repoConfig.profiles?.[activeProfileName] as Record<string, unknown> | undefined)?.provider !== undefined ||
+      (dotJamConfig.profiles?.[activeProfileName] as Record<string, unknown> | undefined)?.provider !== undefined ||
+      (xdgConfig.profiles?.[activeProfileName] as Record<string, unknown> | undefined)?.provider !== undefined;
 
-      if (!providerExplicitlySet) {
+    if (!providerExplicitlySet) {
+      const detected = await detectBestProvider();
+      if (detected) {
         config = {
           ...config,
           profiles: {
             ...config.profiles,
-            [activeProfileName]: { ...activeProfile, provider: 'copilot' },
+            [activeProfileName]: {
+              ...activeProfile,
+              provider: detected.provider,
+              ...(detected.model ? { model: detected.model } : {}),
+              // Clear default ollama baseUrl when switching providers
+              baseUrl: undefined,
+            },
           },
         };
       }
