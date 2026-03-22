@@ -192,7 +192,7 @@ export async function runInit(options: InitOptions = {}): Promise<void> {
       write(`  ${chalk.yellow('[·]')} ${CONTEXT_FILENAME} already exists — skipping.\n`);
     } else {
       const content = await generateContextContent(workspaceRoot);
-      const path = await writeContextFile(workspaceRoot, content);
+      await writeContextFile(workspaceRoot, content);
       write(`  ${chalk.green('✓')} Created ${chalk.cyan(CONTEXT_FILENAME)} for project context.\n`);
     }
 
