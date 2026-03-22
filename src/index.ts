@@ -386,9 +386,14 @@ context
 program
   .command('trace [symbol]')
   .description('Trace the call graph of a function, class, or symbol across the codebase')
-  .option('--depth <n>', 'upstream chain depth (default: 3)', '3')
+  .option('--depth <n>', 'upstream chain depth (default: 10)', '10')
   .option('--no-ai', 'skip AI analysis')
   .option('--json', 'output call graph as JSON')
+  .option('--impact', 'show what breaks if symbol changes')
+  .option('--reindex', 'force rebuild trace index')
+  .option('--lang <lang>', 'override language detection')
+  .option('--mermaid', 'output as Mermaid diagram')
+  .option('--data-lineage', 'trace column/variable flow (Phase 2)')
   .action(async (symbol: string | undefined, cmdOpts: Record<string, unknown>) => {
     const g = globalOpts();
     const { runTrace } = await import('./commands/trace.js');
@@ -402,6 +407,11 @@ program
       depth: cmdOpts['depth'] ? parseInt(String(cmdOpts['depth']), 10) : undefined,
       noAi: cmdOpts['ai'] === false,
       json: cmdOpts['json'] as boolean | undefined,
+      impact: cmdOpts['impact'] as boolean | undefined,
+      reindex: cmdOpts['reindex'] as boolean | undefined,
+      lang: cmdOpts['lang'] as string | undefined,
+      mermaid: cmdOpts['mermaid'] as boolean | undefined,
+      dataLineage: cmdOpts['dataLineage'] as boolean | undefined,
     });
   });
 
