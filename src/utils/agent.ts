@@ -17,6 +17,7 @@ import { readdir } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { loadContextFile } from './context.js';
 import type { ProviderAdapter, Message } from '../providers/base.js';
+import { JAM_SOUL } from '../personality/soul.js';
 
 // ── ANSI helpers ──────────────────────────────────────────────────────────────
 
@@ -121,8 +122,8 @@ export function buildSystemPrompt(
   options: SystemPromptOptions = { mode: 'readonly' },
 ): string {
   const modeDesc = options.mode === 'readwrite'
-    ? 'You are an expert developer assistant with full read/write access to the local codebase via tools. Your job is to ACTUALLY WRITE CODE using tools, not just describe it. You MUST use write_file to create and modify files.'
-    : 'You are an expert code assistant. You help developers understand their codebase by reading and searching source files.';
+    ? JAM_SOUL + '\n\nYou have full read/write access to the local codebase via tools. Your job is to ACTUALLY WRITE CODE using tools, not just describe it. You MUST use write_file to create and modify files.'
+    : JAM_SOUL + '\n\nYou help developers understand their codebase by reading and searching source files.';
 
   return [
     modeDesc,
@@ -171,7 +172,7 @@ export function buildSystemPrompt(
 
 // ── Search planner (deep reasoning step) ──────────────────────────────────────
 
-const PLANNER_SYSTEM_PROMPT = `You are a search planner for a code assistant. Your job is to analyze the user's question and create a focused search plan.
+const PLANNER_SYSTEM_PROMPT = `You are Jam. You're planning a search strategy for a developer's question. Be focused and specific.
 
 You will receive:
 1. A user's question about a codebase

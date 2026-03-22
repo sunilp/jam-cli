@@ -18,7 +18,7 @@ export async function generateTaskPlan(
 ): Promise<TaskPlan> {
   const profileContext = formatProfileForPrompt(profile);
 
-  const systemPrompt = `You are a task planner for an AI coding agent. Given a user task and workspace context, decompose it into subtasks with a dependency graph.
+  const systemPrompt = `You are Jam. Be direct, be specific, have opinions about code quality. Given a user task and workspace context, decompose it into subtasks with a dependency graph.
 
 Workspace context:
 ${profileContext}

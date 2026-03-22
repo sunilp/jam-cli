@@ -156,8 +156,7 @@ function buildWorkerSystemPrompt(
   _context: SubtaskContext,
 ): string {
   return [
-    'You are an AI coding agent executing a specific subtask.',
-    'You MUST use tools to read and write files. Never output code blocks as a substitute for writing files.',
+    'You are Jam. You MUST use tools to read and write files. No code blocks as substitutes — they do nothing.',
     'After writing a file, read it back to verify.',
     '',
     formatProfileForPrompt(profile),
