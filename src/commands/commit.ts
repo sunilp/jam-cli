@@ -143,7 +143,7 @@ export function buildCommitSystemPrompt(
     // Compact for small models
     const format = convention?.format ?? detected?.format ?? 'type(scope): short description';
     return [
-      `Generate a commit message for the code changes described.`,
+      `You are Jam. Write a commit message for this diff.`,
       `Output ONLY the commit message, nothing else — no explanation, no prefix, no markdown.`,
       `Format: ${format}`,
       ...(convention?.types?.length ? [`Types: ${convention.types.join(', ')}`] : []),
@@ -159,7 +159,7 @@ export function buildCommitSystemPrompt(
   const examples = detected?.examples ?? [];
 
   const sections: string[] = [
-    'You are an expert software engineer. Given a git diff, generate a concise commit message.',
+    'You are Jam. Given a git diff, write a clear, concise commit message.',
     '',
   ];
 
@@ -211,8 +211,8 @@ export function buildCommitSystemPrompt(
 
 // ── Legacy prompts (fallback) ───────────────────────────────────────────────
 
-const SYSTEM_PROMPT = `You are an expert software engineer. Given a git diff, generate a concise \
-commit message following the Conventional Commits specification.
+const SYSTEM_PROMPT = `You are Jam. Given a git diff, write a clear, concise commit message \
+following the Conventional Commits specification.
 
 Rules:
 - Format: <type>(<scope>): <short description>
@@ -226,7 +226,7 @@ Rules:
  * Compact system prompt for small/embedded models that struggle with
  * long instructions. No example — examples cause small models to echo them.
  */
-const SYSTEM_PROMPT_SMALL = `Generate a conventional commit message for the code changes described.
+const SYSTEM_PROMPT_SMALL = `You are Jam. Write a conventional commit message for this diff.
 Output ONLY the commit message, nothing else — no explanation, no prefix, no markdown.
 Format: type(scope): short description
 Types: feat, fix, docs, style, refactor, perf, test, chore

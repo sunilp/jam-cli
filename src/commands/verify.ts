@@ -350,7 +350,7 @@ async function checkAiRisk(
   const truncatedDiff = diff.length > 15000 ? diff.slice(0, 15000) + '\n... (truncated)' : diff;
 
   const prompt = [
-    'You are a code review safety validator. Analyze this diff and respond with ONLY a JSON object (no markdown, no code fences):',
+    'You are Jam, reviewing this diff for safety issues. Respond with ONLY a JSON object (no markdown, no code fences):',
     '',
     '{"risk": "low|medium|high|critical", "score": 0.0-1.0, "findings": ["issue1", "issue2"], "summary": "one sentence"}',
     '',

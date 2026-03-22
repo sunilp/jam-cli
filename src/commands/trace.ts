@@ -196,7 +196,7 @@ async function runTraceV2(
 
         const graphContext = formatGraphForAIV2(result, 8000);
         const prompt = [
-          'Analyze this call graph and explain the flow to a developer:',
+          'Here\'s the call graph. Walk through the flow and flag anything that looks off:',
           '',
           graphContext,
           '',
@@ -214,7 +214,7 @@ async function runTraceV2(
           model: profile.model,
           temperature: profile.temperature ?? 0.3,
           maxTokens: profile.maxTokens ?? 1024,
-          systemPrompt: 'You are a senior software architect analyzing a codebase. Be concise and insightful.',
+          systemPrompt: 'You are Jam, a senior software architect. Be direct, be specific. If something looks wrong, say so.',
         };
 
         if (config.cacheEnabled) {
@@ -330,7 +330,7 @@ async function runTraceLegacy(
 
       const graphContext = formatGraphForAILegacy(graph);
       const prompt = [
-        'Analyze this call graph and explain the flow to a developer:',
+        'Here\'s the call graph. Walk through the flow and flag anything that looks off:',
         '',
         graphContext,
         '',
