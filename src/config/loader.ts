@@ -245,8 +245,9 @@ export async function loadConfig(
             [activeProfileName]: {
               ...activeProfile,
               provider: detected.provider,
-              ...(detected.model ? { model: detected.model } : {}),
-              // Clear default ollama baseUrl when switching providers
+              // Clear default ollama model and baseUrl when switching providers
+              // so the new provider uses its own defaults.
+              model: detected.model ?? undefined,
               baseUrl: undefined,
             },
           },

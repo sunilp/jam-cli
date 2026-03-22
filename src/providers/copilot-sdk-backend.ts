@@ -8,6 +8,7 @@ import type {
   StreamChunk,
   Message,
   ToolDefinition,
+  ToolCall,
   ChatWithToolsResponse,
 } from './base.js';
 import { JamError } from '../utils/errors.js';
@@ -203,49 +204,45 @@ export class CopilotSdkBackend implements ProviderAdapter {
 
     const { approveAll } = await import('@github/copilot-sdk');
 
-    // Import jam's tool execution function
-    const { executeTool } = await import('../tools/all-tools.js');
-    const cwd = process.cwd();
-
-    // Map jam tool definitions to SDK tools with real execution handlers
-    const sdkTools = tools.map((t) => ({
-      name: t.name,
-      description: t.description,
-      parameters: t.parameters as Record<string, unknown>,
-      handler: async (args: Record<string, unknown>) => {
-        try {
-          const result = await executeTool(t.name, args, cwd);
-          return { textResultForLlm: result, resultType: 'success' as const };
-        } catch (err) {
-          const errMessage = err instanceof Error ? err.message : String(err);
-          return { textResultForLlm: `Error: ${errMessage}`, resultType: 'failure' as const };
-        }
-      },
-    }));
+    // Build a tool-description block for the system prompt so the model
+    // knows which tools are available and returns tool calls in JSON.
+    const toolBlock = tools.length > 0
+      ? '\n\nAvailable tools (call ONE tool per response using JSON):\n' +
+        tools.map(t =>
+          `- ${t.name}: ${t.description}\n  Parameters: ${JSON.stringify(t.parameters)}`
+        ).join('\n') +
+        '\n\nTo call a tool, respond with ONLY a JSON object:\n' +
+        '{"tool":"<tool_name>","arguments":{...}}\n' +
+        'Do NOT wrap in markdown. Do NOT add any text before or after the JSON.'
+      : '';
 
     const sessionConfig: Record<string, unknown> = {
       onPermissionRequest: approveAll,
-      tools: sdkTools,
       streaming: false,
     };
     if (options?.model || this.options.model) {
       sessionConfig['model'] = options?.model ?? this.options.model;
     }
     if (options?.systemPrompt) {
-      sessionConfig['systemMessage'] = { mode: 'append' as const, content: options.systemPrompt };
+      sessionConfig['systemMessage'] = {
+        mode: 'append' as const,
+        content: options.systemPrompt + toolBlock,
+      };
+    } else if (toolBlock) {
+      sessionConfig['systemMessage'] = {
+        mode: 'append' as const,
+        content: toolBlock,
+      };
     }
 
     const session = await this.client.createSession(sessionConfig);
-
     const prompt = formatMessages(messages);
 
-    // sendAndWait returns AssistantMessageEvent | undefined
     const result = await session.sendAndWait(
       { prompt },
       this.options.requestTimeoutMs ?? 120_000
     );
 
-    // AssistantMessageEvent has shape: { type: "assistant.message", data: { content: string, ... } }
     let content: string | null = null;
     if (result) {
       content = result.data?.content ?? null;
@@ -253,7 +250,14 @@ export class CopilotSdkBackend implements ProviderAdapter {
 
     await session.disconnect();
 
-    // All tools already executed by SDK — no pending tool calls
+    // Try to parse tool calls from the model's response
+    const toolCalls = content ? parseToolCalls(content) : undefined;
+    if (toolCalls) {
+      // If we parsed tool calls, clear the content so the caller
+      // knows this is a tool-call response, not a text response.
+      return { content: null, toolCalls };
+    }
+
     return { content, toolCalls: undefined };
   }
 
@@ -304,4 +308,29 @@ function formatMessages(messages: Message[]): string {
     }
   }
   return parts.join('\n\n');
+}
+
+/**
+ * Parse tool calls from model text output.
+ * The model is instructed to respond with JSON: {"tool":"name","arguments":{...}}
+ */
+function parseToolCalls(text: string): ToolCall[] | undefined {
+  // Try to find JSON tool call in the response
+  const jsonMatch = text.match(/\{[\s\S]*?"tool"\s*:\s*"[\s\S]*?\}/);
+  if (!jsonMatch) return undefined;
+
+  try {
+    const parsed = JSON.parse(jsonMatch[0]) as { tool?: string; arguments?: Record<string, unknown> };
+    if (parsed.tool && typeof parsed.tool === 'string') {
+      return [{
+        id: `call_${Date.now()}`,
+        name: parsed.tool,
+        arguments: (parsed.arguments ?? {}) as Record<string, unknown>,
+      }];
+    }
+  } catch {
+    // Not valid JSON
+  }
+
+  return undefined;
 }

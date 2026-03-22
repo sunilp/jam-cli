@@ -281,6 +281,9 @@ async function legacyRun(instruction: string, options: RunOptions): Promise<void
     const originalLineCounts = new Map<string, number>();
     // Track per-file write count to detect wasted iterations
     const fileWriteCounts = new Map<string, number>();
+    // Track write-enforcement retries to prevent infinite loops
+    let writeEnforcementRetries = 0;
+    const MAX_WRITE_ENFORCEMENT_RETRIES = 3;
     const stepVerifier = new StepVerifier();
 
     // Merge MCP tool schemas with built-in tools
@@ -378,8 +381,9 @@ async function legacyRun(instruction: string, options: RunOptions): Promise<void
           .slice(currentStepIdx)
           .find(s => s.tool === 'write_file' || s.tool === 'apply_patch');
 
-        if (pendingWriteStep && iteration < MAX_ITERATIONS - 2) {
-          stderrLog(formatInternalStatus(`Write-enforcement: model skipped write_file — forcing retry on Step ${pendingWriteStep.id}`, noColor) + '\n');
+        if (pendingWriteStep && iteration < MAX_ITERATIONS - 2 && writeEnforcementRetries < MAX_WRITE_ENFORCEMENT_RETRIES) {
+          writeEnforcementRetries++;
+          stderrLog(formatInternalStatus(`Write-enforcement: model skipped write_file — forcing retry on Step ${pendingWriteStep.id} (${writeEnforcementRetries}/${MAX_WRITE_ENFORCEMENT_RETRIES})`, noColor) + '\n');
           messages.push({ role: 'assistant', content: finalText });
           messages.push({
             role: 'user',
@@ -406,7 +410,8 @@ async function legacyRun(instruction: string, options: RunOptions): Promise<void
         // If the model produced only Markdown code blocks without calling write_file,
         // force it to use tools instead. Pivot the message based on what's been done.
         const looksLikeHallucinatedCode = /```(?:typescript|ts|javascript|js)\n/.test(finalText);
-        if (looksLikeHallucinatedCode && !tracker.wasToolCalled('write_file') && iteration < MAX_ITERATIONS - 2) {
+        if (looksLikeHallucinatedCode && !tracker.wasToolCalled('write_file') && iteration < MAX_ITERATIONS - 2 && writeEnforcementRetries < MAX_WRITE_ENFORCEMENT_RETRIES) {
+          writeEnforcementRetries++;
           stderrLog(formatInternalStatus('Write-enforcement: Markdown-only response — forcing tool use', noColor) + '\n');
           messages.push({ role: 'assistant', content: finalText });
           const alreadyReadRef = tracker.wasToolCalled('read_file');
