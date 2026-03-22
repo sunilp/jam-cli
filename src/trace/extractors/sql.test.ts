@@ -12,9 +12,8 @@ async function extract(source: string) {
   // minimal) rootNode.  If tree-sitter is unavailable we construct a stub.
   let rootNode: Parser.SyntaxNode;
 
-  if (isTreeSitterAvailable()) {
-    const tree = await parseSource(source, 'sql');
-    if (!tree) throw new Error('parseSource returned null');
+  const tree = isTreeSitterAvailable() ? await parseSource(source, 'sql') : null;
+  if (tree) {
     rootNode = tree.rootNode;
   } else {
     // Minimal stub so the extractor can run in regex-only mode

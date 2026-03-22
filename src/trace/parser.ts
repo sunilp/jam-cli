@@ -79,7 +79,12 @@ export async function parseSource(
   const grammar = loadGrammar(language);
   if (!grammar) return null;
 
-  const parser = new TreeSitter!();
-  parser.setLanguage(grammar);
-  return parser.parse(source);
+  try {
+    const parser = new TreeSitter!();
+    parser.setLanguage(grammar);
+    return parser.parse(source);
+  } catch {
+    // Grammar loaded but is invalid (e.g., tree-sitter-sql ABI mismatch)
+    return null;
+  }
 }

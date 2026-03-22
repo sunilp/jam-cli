@@ -41,9 +41,12 @@ function findEnclosingFunction(node: Parser.SyntaxNode): string {
         childNode(current, 'identifier');
       if (name) return name.text;
     }
-    if (current.type === 'variable_declarator') {
-      const id = childNode(current, 'identifier');
-      if (id) return id.text;
+    if (current.type === 'arrow_function' || current.type === 'function_expression') {
+      // Named via variable_declarator parent: const handler = () => { ... }
+      if (current.parent?.type === 'variable_declarator') {
+        const id = childNode(current.parent, 'identifier');
+        if (id) return id.text;
+      }
     }
     current = current.parent;
   }
