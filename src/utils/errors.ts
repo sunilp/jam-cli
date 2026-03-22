@@ -31,69 +31,68 @@ export type ErrorCode =
  */
 export const ERROR_HINTS: Partial<Record<ErrorCode, string>> = {
   CONFIG_INVALID:
-    'Check your .jamrc or config file for syntax errors.\n' +
-    'Run `jam config show` to see the merged config, or `jam init` to generate a fresh one.',
+    'Your config has a syntax error.\n' +
+    'Run `jam config show` to see what\'s loaded, or `jam init` to start fresh.',
   CONFIG_NOT_FOUND:
-    'The requested profile does not exist. Run `jam config show` to see available profiles.',
+    'That profile doesn\'t exist. Run `jam config show` to see what\'s available.',
   PROVIDER_AUTH_FAILED:
-    'Set the appropriate API key for your provider:\n' +
+    'No API key found. Set one for your provider:\n' +
     '  Anthropic: export ANTHROPIC_API_KEY=sk-ant-...\n' +
     '  OpenAI:    export OPENAI_API_KEY=sk-...\n' +
     '  Groq:      export GROQ_API_KEY=gsk_...\n' +
-    '  Ollama:    No API key needed — just run `ollama serve`',
+    '  Ollama:    No key needed — just run `ollama serve`',
   PROVIDER_UNAVAILABLE:
-    'The provider is not reachable. Check your network or provider status.\n' +
-    'For Ollama: make sure it\'s running with `ollama serve`\n' +
-    'Run `jam doctor` for full diagnostics.',
+    'Can\'t reach the provider. If it\'s Ollama, make sure `ollama serve` is running.\n' +
+    'If it\'s a remote API, check your network. Run `jam doctor` for the full picture.',
   PROVIDER_RATE_LIMITED:
-    'You\'ve hit the provider\'s rate limit. Wait a moment and try again.\n' +
-    'Consider switching to a local provider: `jam ask --provider ollama "your question"`',
+    'Rate limit hit. Wait a moment and try again.\n' +
+    'Or dodge it entirely: `jam ask --provider ollama "your question"`',
   PROVIDER_QUOTA_EXHAUSTED:
-    'Your API quota is exhausted. This is NOT a transient error — retrying will not help.\n' +
-    'Check your billing/plan at your provider\'s dashboard and add credits.\n' +
-    'Or switch to a local provider: `jam ask --provider ollama "your question"`',
+    'Your API quota is spent. Retrying won\'t help here.\n' +
+    'Check your billing dashboard and add credits, or switch to local: `jam ask --provider ollama "your question"`',
   PROVIDER_MODEL_NOT_FOUND:
-    'The model is not available. Check available models with: `jam models list`\n' +
-    'For Ollama, pull the model first: `ollama pull <model-name>`',
+    'That model doesn\'t exist. Check what\'s available: `jam models list`\n' +
+    'For Ollama, pull it first: `ollama pull <model-name>`',
   PROVIDER_STREAM_ERROR:
-    'The provider returned an unexpected response. This may be transient.\n' +
-    'Try again, or switch providers with: `--provider <name>`',
+    'Got an unexpected response from the provider. Might be transient.\n' +
+    'Try again, or switch providers with `--provider <name>`.',
   INPUT_MISSING:
-    'Provide input as an argument, via --file, or pipe from stdin.\n' +
+    'No input. Pass it as an argument, via --file, or pipe from stdin.\n' +
     'Example: jam ask "your question" or echo "question" | jam ask',
   INPUT_FILE_NOT_FOUND:
-    'The specified file does not exist. Check the path and try again.',
+    'That file doesn\'t exist. Double-check the path.',
   SECRETS_UNAVAILABLE:
-    'Secure credential storage (keytar) is not available.\n' +
+    'Secure credential storage isn\'t available on this system.\n' +
     'Use environment variables instead: export ANTHROPIC_API_KEY=...',
   TOOL_DENIED:
-    'The tool call was denied by your tool policy.\n' +
-    'Adjust toolPolicy in your config or use `--yes` to auto-approve writes.',
+    'Tool call blocked by your policy.\n' +
+    'Adjust toolPolicy in config or use `--yes` to auto-approve writes.',
   TOOL_NOT_FOUND:
-    'The requested tool does not exist. This is likely an internal error.',
+    'That tool doesn\'t exist. This is probably a bug on our end.',
   TOOL_EXEC_ERROR:
-    'A tool failed to execute. Check that git and other dependencies are installed.\n' +
-    'Run `jam doctor` for diagnostics.',
+    'A tool failed to execute. Make sure git and other deps are installed.\n' +
+    'Run `jam doctor` to check your setup.',
   AGENT_PLAN_FAILED:
-    'The AI could not generate a valid execution plan. Try simplifying your task or breaking it into smaller pieces.',
+    'The model couldn\'t produce a structured plan. This usually means the model is too small for the task.\n' +
+    'Try a larger model or simplify the instruction.',
   AGENT_PLAN_CYCLE:
-    'The execution plan has circular dependencies. This is a bug — please report it.',
+    'The plan has circular dependencies. That\'s a bug — please report it.',
   AGENT_WORKER_TIMEOUT:
-    'A worker exceeded its round budget. Try increasing maxRoundsPerWorker in config.',
+    'Worker hit its round limit. Try bumping maxRoundsPerWorker in config.',
   AGENT_WORKER_CANCELLED:
-    'Worker was cancelled. This may be due to a dependency failure or user abort.',
+    'Worker was cancelled — likely a dependency failure or user abort.',
   AGENT_FILE_LOCK_CONFLICT:
-    'Two workers tried to edit the same file simultaneously. The orchestrator resolved the conflict.',
+    'Two workers tried to edit the same file. The orchestrator sorted it out.',
   AGENT_FILE_LOCK_TIMEOUT:
-    'A file lock request timed out. Another worker may be stuck.',
+    'File lock timed out. Another worker might be stuck.',
   AGENT_BUDGET_EXCEEDED:
-    'Token budget exceeded. Reduce task scope or increase maxTotal in agent config.',
+    'Token budget exceeded. Reduce the scope or bump maxTotal in agent config.',
   AGENT_SANDBOX_UNAVAILABLE:
-    'OS sandbox not available. Running with permissions-only. Run jam doctor to check.',
+    'OS sandbox not available. Running with permissions only. Check `jam doctor`.',
   AGENT_RATE_LIMITED:
-    'Provider rate limit hit. Workers paused automatically. Wait and retry.',
+    'Provider rate limit hit. Workers paused automatically. Give it a moment.',
   AGENT_MERGE_CONFLICT:
-    'Workers produced conflicting file edits. Manual resolution may be needed.',
+    'Workers produced conflicting edits. You may need to resolve this manually.',
 };
 
 export class JamError extends Error {
