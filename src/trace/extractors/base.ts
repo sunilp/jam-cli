@@ -3,7 +3,7 @@ import type { SymbolRecord, CallRecord, ImportRecord, ColumnRecord } from '../st
 
 /** Records extracted from a single file. */
 export interface ExtractionResult {
-  symbols: Omit<SymbolRecord, 'language'>[];
+  symbols: Omit<SymbolRecord, 'language' | 'file'>[];
   calls: Array<{ callerName: string; calleeName: string; line: number; arguments?: string; kind?: string }>;
   imports: Omit<ImportRecord, 'file'>[];
   columns: Array<{ symbolName: string; tableName: string; columnName: string; operation: string }>;
