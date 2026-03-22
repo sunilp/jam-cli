@@ -32,6 +32,8 @@ AI-powered agentic execution. 978 tests. Zero vendor lock-in.
 
 ## What Jam Does
 
+Jam isn't a generic AI assistant. It's the senior dev who's seen everything — direct, opinionated, and warm. Every message, error, and prompt speaks with the same voice: concise, specific, developer-aligned.
+
 - 🔍 **Call graph tracing** — trace any symbol's callers, callees, and upstream chain across languages
 - 💥 **Impact analysis** — "if I change this, what breaks?" with column-level SQL dependency tracking
 - 🤖 **Agentic execution** — `jam go` (interactive) and `jam run` (one-shot) decompose tasks into parallel subtasks
