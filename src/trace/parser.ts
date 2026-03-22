@@ -69,10 +69,11 @@ function loadGrammar(language: string): Parser.Language | null {
 }
 
 /** Parse source code and return the tree. Returns null if grammar unavailable. */
-export function parseSource(
+// eslint-disable-next-line @typescript-eslint/require-await
+export async function parseSource(
   source: string,
   language: string,
-): Parser.Tree | null {
+): Promise<Parser.Tree | null> {
   if (!TreeSitter && !isTreeSitterAvailable()) return null;
 
   const grammar = loadGrammar(language);
