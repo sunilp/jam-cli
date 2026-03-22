@@ -1,89 +1,50 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="800" height="520" viewBox="0 0 800 520">
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="480" viewBox="0 0 800 480">
   <defs>
     <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#667eea"/>
-      <stop offset="50%" style="stop-color:#764ba2"/>
-      <stop offset="100%" style="stop-color:#f093fb"/>
+      <stop offset="0%" stop-color="#667eea"/>
+      <stop offset="50%" stop-color="#764ba2"/>
+      <stop offset="100%" stop-color="#f093fb"/>
     </linearGradient>
-    <filter id="shadow">
-      <feDropShadow dx="0" dy="4" stdDeviation="10" flood-color="#000" flood-opacity="0.35"/>
-    </filter>
-    <style>
-      .scene { opacity: 0; }
-      .scene1 { animation: fade1 18s infinite; }
-      .scene2 { animation: fade2 18s infinite; }
-      .scene3 { animation: fade3 18s infinite; }
-      @keyframes fade1 { 0%,3% { opacity:0 } 5%,30% { opacity:1 } 32%,100% { opacity:0 } }
-      @keyframes fade2 { 0%,33% { opacity:0 } 36%,63% { opacity:1 } 66%,100% { opacity:0 } }
-      @keyframes fade3 { 0%,66% { opacity:0 } 69%,95% { opacity:1 } 98%,100% { opacity:0 } }
-      .cursor { animation: blink 1s step-end infinite; }
-      @keyframes blink { 0%,50% { opacity:1 } 51%,100% { opacity:0 } }
-    </style>
   </defs>
 
-  <!-- Background gradient -->
-  <rect width="800" height="520" fill="url(#bg)"/>
+  <rect width="800" height="480" fill="url(#bg)"/>
 
-  <!-- Terminal window -->
-  <rect x="28" y="24" width="744" height="472" rx="10" fill="#1e1e2e" filter="url(#shadow)"/>
-  <!-- Title bar -->
-  <rect x="28" y="24" width="744" height="36" rx="10" fill="#313244"/>
-  <rect x="28" y="50" width="744" height="10" fill="#313244"/>
-  <!-- Traffic lights -->
+  <rect x="24" y="20" width="752" height="440" rx="10" fill="#11111b"/>
+  <rect x="28" y="24" width="744" height="432" rx="8" fill="#1e1e2e"/>
+
+  <rect x="28" y="24" width="744" height="36" rx="8" fill="#313244"/>
+  <rect x="28" y="52" width="744" height="8" fill="#313244"/>
+
   <circle cx="52" cy="42" r="6" fill="#f38ba8"/>
   <circle cx="72" cy="42" r="6" fill="#f9e2af"/>
   <circle cx="92" cy="42" r="6" fill="#a6e3a1"/>
   <text x="400" y="47" text-anchor="middle" font-family="SF Mono,Menlo,monospace" font-size="12" fill="#a6adc8">~/my-project</text>
 
-  <!-- SCENE 1: jam trace --impact -->
-  <g class="scene scene1" font-family="SF Mono,Menlo,Consolas,monospace" font-size="12.5" fill="#cdd6f4">
-    <text x="48" y="82"><tspan fill="#a6e3a1">$</tspan> jam trace updateBalance <tspan fill="#6c7086">--impact</tspan></text>
-    <text x="48" y="112" font-weight="bold" fill="#89b4fa">Impact Analysis for updateBalance</text>
-    <text x="48" y="128" fill="#585b70">═══════════════════════════════════════</text>
-    <text x="48" y="154">Direct callers:</text>
-    <text x="48" y="172">  → PaymentService.processRefund() <tspan fill="#6c7086">[Java]</tspan> <tspan fill="#6c7086">(line 142)</tspan></text>
-    <text x="48" y="190">  → BATCH_NIGHTLY_RECONCILE <tspan fill="#6c7086">[SQL]</tspan> <tspan fill="#6c7086">(line 34)</tspan></text>
-    <text x="48" y="218">Column dependents:</text>
-    <text x="48" y="236">  → VIEW v_customer_summary <tspan fill="#6c7086">(reads customer.balance)</tspan></text>
-    <text x="48" y="254">  → PROC_MONTHLY_STATEMENT <tspan fill="#6c7086">(reads customer.balance)</tspan></text>
-    <text x="48" y="282">Trigger chain:</text>
-    <text x="48" y="300">  → TRG_CUSTOMER_AUDIT fires on UPDATE customer</text>
-    <text x="48" y="328">Risk: <tspan fill="#f9e2af" font-weight="bold">HIGH</tspan> — 2 callers across 2 languages, 2 column dependents</text>
-    <text x="48" y="370" fill="#585b70">───────────────────────────────────────────────────</text>
-    <text x="48" y="394"><tspan fill="#a6e3a1">$</tspan> <tspan class="cursor" fill="#cdd6f4">▊</tspan></text>
-  </g>
+  <g font-family="SF Mono,Menlo,Consolas,monospace" font-size="12.5" fill="#cdd6f4">
+    <text x="48" y="84"><tspan fill="#a6e3a1">$</tspan> jam trace updateBalance <tspan fill="#6c7086">--impact</tspan></text>
 
-  <!-- SCENE 2: jam git wtf -->
-  <g class="scene scene2" font-family="SF Mono,Menlo,Consolas,monospace" font-size="12.5" fill="#cdd6f4">
-    <text x="48" y="82"><tspan fill="#a6e3a1">$</tspan> jam git wtf</text>
-    <text x="48" y="112" font-weight="bold" fill="#89b4fa">Git Status — Explained</text>
-    <text x="48" y="128" fill="#585b70">───────────────────────────────────</text>
-    <text x="48" y="154"><tspan font-weight="bold">Branch:</tspan>  feat/auth-refactor <tspan fill="#6c7086">(4 ahead of main)</tspan></text>
-    <text x="48" y="172"><tspan font-weight="bold">Staged:</tspan>  3 files — src/auth/*.ts</text>
-    <text x="48" y="190"><tspan font-weight="bold">Modified:</tspan> 1 file — package.json</text>
-    <text x="48" y="208"><tspan font-weight="bold">Stash:</tspan>   1 entry</text>
-    <text x="48" y="244"><tspan fill="#a6e3a1" font-weight="bold">Suggestion:</tspan> Your auth refactor looks ready.</text>
-    <text x="48" y="262">Commit the staged files, then rebase onto main.</text>
-    <text x="48" y="310" fill="#585b70">───────────────────────────────────────────────────</text>
-    <text x="48" y="334"><tspan fill="#a6e3a1">$</tspan> <tspan class="cursor" fill="#cdd6f4">▊</tspan></text>
-  </g>
+    <text x="48" y="114" font-weight="bold" fill="#89b4fa">Impact Analysis for updateBalance</text>
+    <text x="48" y="130" fill="#45475a">═══════════════════════════════════════</text>
 
-  <!-- SCENE 3: jam run -->
-  <g class="scene scene3" font-family="SF Mono,Menlo,Consolas,monospace" font-size="12.5" fill="#cdd6f4">
-    <text x="48" y="82"><tspan fill="#a6e3a1">$</tspan> jam run 'add input validation' <tspan fill="#6c7086">--yes</tspan></text>
-    <text x="48" y="112">Provider: <tspan fill="#89dceb">copilot</tspan>, Model: <tspan fill="#89dceb">default</tspan></text>
-    <text x="48" y="130"><tspan fill="#585b70">───</tspan> <tspan fill="#cba6f7" font-weight="bold">Plan: Add validation</tspan> <tspan fill="#585b70">(3 subtasks) ───</tspan></text>
-    <text x="48" y="158"><tspan fill="#f9e2af">[Worker 1]</tspan> Reading src/api/users.ts</text>
-    <text x="48" y="176"><tspan fill="#89b4fa">[Worker 2]</tspan> Reading src/api/posts.ts</text>
-    <text x="48" y="194"><tspan fill="#f9e2af">[Worker 1]</tspan> Added Zod validation to createUser</text>
-    <text x="48" y="212"><tspan fill="#89b4fa">[Worker 2]</tspan> Added Zod validation to createPost</text>
-    <text x="48" y="230"><tspan fill="#a6e3a1">[Worker 3]</tspan> Writing tests...</text>
-    <text x="48" y="258"><tspan fill="#f9e2af">[Worker 1]</tspan> <tspan fill="#a6e3a1">✓ Done</tspan></text>
-    <text x="48" y="276"><tspan fill="#89b4fa">[Worker 2]</tspan> <tspan fill="#a6e3a1">✓ Done</tspan></text>
-    <text x="48" y="294"><tspan fill="#a6e3a1">[Worker 3]</tspan> <tspan fill="#a6e3a1">✓ Done</tspan> — 6/6 tests pass</text>
-    <text x="48" y="322" fill="#585b70">[3/3 complete | 2,400 tokens]</text>
-    <text x="48" y="350" fill="#a6e3a1">Task complete.</text>
-    <text x="48" y="388" fill="#585b70">───────────────────────────────────────────────────</text>
-    <text x="48" y="412"><tspan fill="#a6e3a1">$</tspan> <tspan class="cursor" fill="#cdd6f4">▊</tspan></text>
+    <text x="48" y="156" fill="#cdd6f4">Direct callers:</text>
+    <text x="48" y="174" fill="#cdd6f4">  → PaymentService.processRefund() <tspan fill="#6c7086">[Java]</tspan> <tspan fill="#6c7086">(line 142)</tspan></text>
+    <text x="48" y="192" fill="#cdd6f4">  → BATCH_NIGHTLY_RECONCILE <tspan fill="#6c7086">[SQL]</tspan> <tspan fill="#6c7086">(line 34)</tspan></text>
+
+    <text x="48" y="220" fill="#cdd6f4">Column dependents:</text>
+    <text x="48" y="238" fill="#cdd6f4">  → VIEW v_customer_summary <tspan fill="#6c7086">(reads customer.balance)</tspan></text>
+    <text x="48" y="256" fill="#cdd6f4">  → PROC_MONTHLY_STATEMENT <tspan fill="#6c7086">(reads customer.balance)</tspan></text>
+
+    <text x="48" y="284" fill="#cdd6f4">Trigger chain:</text>
+    <text x="48" y="302" fill="#cdd6f4">  → TRG_CUSTOMER_AUDIT fires on UPDATE customer</text>
+
+    <text x="48" y="330" fill="#cdd6f4">Risk: <tspan fill="#f9e2af" font-weight="bold">HIGH</tspan> — 2 callers across 2 languages, 2 column dependents</text>
+
+    <text x="48" y="366" fill="#45475a">───────────────────────────────────────────────────</text>
+
+    <text x="48" y="390" fill="#cdd6f4"><tspan fill="#a6e3a1">$</tspan> jam git wtf</text>
+    <text x="48" y="412" fill="#cdd6f4"><tspan font-weight="bold">Branch:</tspan> feat/auth-refactor <tspan fill="#6c7086">(4 ahead of main)</tspan>  <tspan font-weight="bold">Staged:</tspan> 3 files</text>
+    <text x="48" y="430" fill="#a6e3a1"><tspan font-weight="bold">Suggestion:</tspan><tspan fill="#cdd6f4"> Commit staged files, then rebase onto main.</tspan></text>
+
+    <text x="48" y="454" fill="#cdd6f4"><tspan fill="#a6e3a1">$</tspan> <tspan fill="#585b70">▊</tspan></text>
   </g>
 </svg>
