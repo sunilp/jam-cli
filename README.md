@@ -25,7 +25,7 @@ AI-powered agentic execution. 978 tests. Zero vendor lock-in.
 </div>
 
 <div align="center">
-  <img src="docs/assets/demo.gif" alt="jam CLI demo — trace, git wtf, agent" width="720">
+  <img src="docs/assets/demo.svg" alt="jam CLI — trace, git wtf, agent" width="720">
 </div>
 
 ---
