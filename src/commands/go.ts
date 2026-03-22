@@ -73,10 +73,9 @@ export async function runGo(options: GoCommandOptions): Promise<void> {
       : (config.agent?.maxWorkers ?? 3);
 
     // Print welcome
-    process.stderr.write('\njam go — interactive agent console\n');
-    process.stderr.write(`Provider: ${profile.provider}, Model: ${profile.model ?? 'default'}\n`);
-    process.stderr.write(`Mode: ${mode} | Workers: ${maxWorkers}\n`);
-    process.stderr.write('Type a task, or /stop /status /exit\n\n');
+    process.stderr.write('\njam go\n');
+    process.stderr.write(`${profile.provider}${profile.model ? ` (${profile.model})` : ''} | ${mode} mode | ${maxWorkers} workers\n`);
+    process.stderr.write('Type a task, or /help for commands.\n\n');
 
     // Interactive readline loop
     const rl = readline.createInterface({
@@ -104,17 +103,16 @@ export async function runGo(options: GoCommandOptions): Promise<void> {
       if (input === '/stop') {
         if (currentAbort) {
           currentAbort.abort();
-          process.stderr.write('Stopping current task...\n');
+          process.stderr.write('Stopping...\n');
         } else {
-          process.stderr.write('No task running.\n');
+          process.stderr.write('Nothing running.\n');
         }
         rl.prompt();
         return;
       }
 
       if (input === '/status') {
-        process.stderr.write(`Mode: ${mode} | Workers: ${maxWorkers}\n`);
-        process.stderr.write(`Provider: ${profile.provider} | Model: ${profile.model ?? 'default'}\n`);
+        process.stderr.write(`${profile.provider} (${profile.model ?? 'default'}) | ${mode} mode | ${maxWorkers} workers\n`);
         process.stderr.write(`Workspace: ${workspaceRoot}\n`);
         rl.prompt();
         return;
@@ -122,18 +120,18 @@ export async function runGo(options: GoCommandOptions): Promise<void> {
 
       if (input === '/help') {
         process.stderr.write('Commands:\n');
-        process.stderr.write('  /status  — show current mode, provider, workspace\n');
-        process.stderr.write('  /stop    — abort the running task\n');
-        process.stderr.write('  /exit    — quit the agent console\n');
-        process.stderr.write('  /help    — show this help\n');
-        process.stderr.write('\nAnything else is sent as a task to the orchestrator.\n');
+        process.stderr.write('  /status  — where things stand\n');
+        process.stderr.write('  /stop    — kill the current task\n');
+        process.stderr.write('  /exit    — done for now\n');
+        process.stderr.write('  /help    — this\n');
+        process.stderr.write('\nEverything else is a task for the orchestrator.\n');
         rl.prompt();
         return;
       }
 
       // Ignore unrecognized slash commands
       if (input.startsWith('/')) {
-        process.stderr.write(`Unknown command: ${input}. Type /help for available commands.\n`);
+        process.stderr.write(`Unknown: ${input}. Try /help.\n`);
         rl.prompt();
         return;
       }

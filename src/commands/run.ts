@@ -60,10 +60,10 @@ async function confirmToolCall(
   toolName: string,
   args: Record<string, unknown>
 ): Promise<boolean> {
-  process.stderr.write(`\n[Tool Request] ${toolName}\n`);
+  process.stderr.write(`\n[Tool] ${toolName}\n`);
   process.stderr.write(`Arguments: ${JSON.stringify(args, null, 2)}\n`);
   const rl = createInterface({ input: process.stdin, output: process.stderr });
-  const answer = await rl.question('Allow this tool call? [y/N] ');
+  const answer = await rl.question('Allow? [y/N] ');
   rl.close();
   return answer.toLowerCase() === 'y';
 }
@@ -111,8 +111,8 @@ export async function runRun(instruction: string | undefined, options: RunOption
     // Connect to MCP servers (non-fatal if any fail)
     const mcpManager = await createMcpManager(config.mcpServers, stderrLog, config.mcpGroups);
 
-    stderrLog(`Starting task: ${instruction}\n`);
-    stderrLog(`Provider: ${profile.provider}, Model: ${profile.model ?? 'default'}\n`);
+    stderrLog(`On it. ${instruction}\n`);
+    stderrLog(`Using ${profile.provider}${profile.model ? ` (${profile.model})` : ''}\n`);
 
     // Merge MCP tool schemas with built-in tools
     const mcpSchemas = mcpManager.getToolSchemas();
@@ -174,12 +174,12 @@ export async function runRun(instruction: string | undefined, options: RunOption
       }
 
       if (result.filesChanged.length > 0) {
-        stderrLog(`\nFiles changed: ${result.filesChanged.join(', ')}\n`);
+        stderrLog(`\nChanged: ${result.filesChanged.join(', ')}\n`);
       }
     }
 
     await mcpManager.shutdown();
-    stderrLog('\nTask complete.\n');
+    stderrLog('\nDone.\n');
   } catch (err) {
     const jamErr = JamError.fromUnknown(err);
 
@@ -187,7 +187,7 @@ export async function runRun(instruction: string | undefined, options: RunOption
     // to the legacy agentic loop which doesn't require a structured plan.
     if (jamErr.code === 'AGENT_PLAN_FAILED') {
       const stderrLog = options.quiet ? (_msg: string) => {} : (msg: string) => process.stderr.write(msg);
-      stderrLog('Planner could not generate a structured plan — falling back to agentic loop.\n');
+      stderrLog('Plan didn\'t work out — falling back to the agentic loop.\n');
       return legacyRun(instruction, options);
     }
 
@@ -211,8 +211,8 @@ async function legacyRun(instruction: string, options: RunOptions): Promise<void
     // Connect to MCP servers (non-fatal if any fail)
     const mcpManager = await createMcpManager(config.mcpServers, stderrLog, config.mcpGroups);
 
-    stderrLog(`Starting task: ${instruction}\n`);
-    stderrLog(`Provider: ${profile.provider}, Model: ${profile.model ?? 'default'}\n`);
+    stderrLog(`On it. ${instruction}\n`);
+    stderrLog(`Using ${profile.provider}${profile.model ? ` (${profile.model})` : ''}\n`);
 
     // Load project context
     const { jamContext, workspaceCtx } = await loadProjectContext(workspaceRoot);
@@ -383,7 +383,7 @@ async function legacyRun(instruction: string, options: RunOptions): Promise<void
 
         if (pendingWriteStep && iteration < MAX_ITERATIONS - 2 && writeEnforcementRetries < MAX_WRITE_ENFORCEMENT_RETRIES) {
           writeEnforcementRetries++;
-          stderrLog(formatInternalStatus(`Write-enforcement: model skipped write_file — forcing retry on Step ${pendingWriteStep.id} (${writeEnforcementRetries}/${MAX_WRITE_ENFORCEMENT_RETRIES})`, noColor) + '\n');
+          stderrLog(formatInternalStatus(`The model described code but didn't write it. Nudging... (${writeEnforcementRetries}/${MAX_WRITE_ENFORCEMENT_RETRIES})`, noColor) + '\n');
           messages.push({ role: 'assistant', content: finalText });
           messages.push({
             role: 'user',
@@ -412,7 +412,7 @@ async function legacyRun(instruction: string, options: RunOptions): Promise<void
         const looksLikeHallucinatedCode = /```(?:typescript|ts|javascript|js)\n/.test(finalText);
         if (looksLikeHallucinatedCode && !tracker.wasToolCalled('write_file') && iteration < MAX_ITERATIONS - 2 && writeEnforcementRetries < MAX_WRITE_ENFORCEMENT_RETRIES) {
           writeEnforcementRetries++;
-          stderrLog(formatInternalStatus('Write-enforcement: Markdown-only response — forcing tool use', noColor) + '\n');
+          stderrLog(formatInternalStatus('Model output Markdown instead of using tools. Nudging...', noColor) + '\n');
           messages.push({ role: 'assistant', content: finalText });
           const alreadyReadRef = tracker.wasToolCalled('read_file');
           if (!alreadyReadRef) {
@@ -508,7 +508,7 @@ async function legacyRun(instruction: string, options: RunOptions): Promise<void
           const writtenFiles = Array.from(fileWriteCounts.keys());
           const missing = detectMissingComponents(instruction, writtenFiles);
           if (missing.length > 0) {
-            stderrLog(formatInternalStatus(`Completeness: missing ${missing.join(', ')} — continuing`, noColor) + '\n');
+            stderrLog(formatInternalStatus(`Looks like we're missing ${missing.join(', ')}. Going back for it.`, noColor) + '\n');
             messages.push({ role: 'assistant', content: finalText });
             messages.push({
               role: 'user',
@@ -720,7 +720,7 @@ async function legacyRun(instruction: string, options: RunOptions): Promise<void
           fileWriteCounts.set(wPath, (fileWriteCounts.get(wPath) ?? 0) + 1);
           if (fileWriteCounts.get(wPath)! >= 3) {
             stderrLog(formatInternalStatus(
-              `Nudge: ${wPath} written ${fileWriteCounts.get(wPath)} times — moving on`,
+              `${wPath} rewritten ${fileWriteCounts.get(wPath)} times. Moving on.`,
               noColor,
             ) + '\n');
             messages.push({
@@ -750,7 +750,7 @@ async function legacyRun(instruction: string, options: RunOptions): Promise<void
     }
 
     await mcpManager.shutdown();
-    stderrLog('\nTask complete.\n');
+    stderrLog('\nDone.\n');
   } catch (err) {
     const jamErr = JamError.fromUnknown(err);
     await printError(jamErr.message, jamErr.hint);
