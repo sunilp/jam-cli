@@ -266,6 +266,12 @@ export class TraceStore {
     return this.db.prepare('SELECT * FROM imports WHERE symbol_name = ?').all(symbolName) as ImportRecord[];
   }
 
+  findColumnsBySymbolId(symbolId: number): ColumnRow[] {
+    return this.db.prepare(
+      'SELECT * FROM columns WHERE symbol_id = ?'
+    ).all(symbolId) as ColumnRow[];
+  }
+
   findSymbolsLike(name: string): SymbolRow[] {
     return this.db.prepare(
       'SELECT * FROM symbols WHERE name LIKE ? COLLATE NOCASE LIMIT 10'
