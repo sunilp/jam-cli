@@ -242,6 +242,14 @@ function pickFortune(): string {
     '"The real tech debt was the friends we made along the way."',
     '"Ship it. Then fix it. Then ship the fix. Then fix the fix."',
     '"Your code is poetry. Unfortunately, it\'s a limerick."',
+    '"The best error message is the one you never see."',
+    '"If your test suite takes longer than your coffee, something\'s wrong."',
+    '"The function that \'no one uses\' is always called from production."',
+    '"git blame is not a judgment. Except when it is."',
+    '"A well-named variable is worth a thousand comments."',
+    '"Your CI pipeline is the only honest stakeholder in the room."',
+    '"Legacy code is just code that makes money."',
+    '"The deploy that goes perfectly is the one that keeps you up at night."',
   ];
   return fortunes[Math.floor(Math.random() * fortunes.length)]!;
 }
