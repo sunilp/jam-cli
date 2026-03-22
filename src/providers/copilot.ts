@@ -19,8 +19,13 @@ interface CopilotAdapterOptions {
 
 /**
  * Smart Copilot provider that dispatches to the best available backend:
- * 1. CopilotSdkBackend — full tool calling via @github/copilot-sdk
- * 2. CopilotProxyBackend — VSCode proxy with OpenAI-compatible tool calling
+ * 1. CopilotProxyBackend — VSCode proxy (preferred: fast HTTP, native tool calling)
+ * 2. CopilotSdkBackend — Copilot CLI fallback (slower: session-based)
+ *
+ * The proxy is preferred because it uses fast HTTP round-trips, making it
+ * suitable for multi-turn agentic loops (jam run, jam go). The SDK backend
+ * starts a new session per call (~2s overhead) which is fine for one-shot
+ * commands but too slow for 10-25 iteration loops.
  */
 export class CopilotAdapter implements ProviderAdapter {
   private backend: ProviderAdapter | null = null;
@@ -49,25 +54,7 @@ export class CopilotAdapter implements ProviderAdapter {
   }
 
   async validateCredentials(): Promise<void> {
-    // Try SDK backend first
-    try {
-      const { isCopilotCliAvailable, CopilotSdkBackend } = await import('./copilot-sdk-backend.js');
-      if (await isCopilotCliAvailable()) {
-        const sdk = new CopilotSdkBackend({
-          apiKey: this.options.apiKey,
-          model: this.options.model,
-          requestTimeoutMs: this.options.requestTimeoutMs,
-        });
-
-        await sdk.validateCredentials();
-        this.backend = sdk;
-        return;
-      }
-    } catch {
-      // SDK failed, fall through to proxy
-    }
-
-    // Try proxy backend
+    // Try proxy backend first (fast HTTP, preferred for agentic loops)
     const port = process.env['JAM_VSCODE_LM_PORT'];
     const baseUrl = this.options.baseUrl ?? (port ? `http://127.0.0.1:${port}` : undefined);
 
@@ -85,15 +72,33 @@ export class CopilotAdapter implements ProviderAdapter {
         this.backend = proxy;
         return;
       } catch {
-        // Proxy also failed
+        // Proxy not available, fall through to SDK
       }
+    }
+
+    // Try SDK backend (slower but works outside VSCode)
+    try {
+      const { isCopilotCliAvailable, CopilotSdkBackend } = await import('./copilot-sdk-backend.js');
+      if (await isCopilotCliAvailable()) {
+        const sdk = new CopilotSdkBackend({
+          apiKey: this.options.apiKey,
+          model: this.options.model,
+          requestTimeoutMs: this.options.requestTimeoutMs,
+        });
+
+        await sdk.validateCredentials();
+        this.backend = sdk;
+        return;
+      }
+    } catch {
+      // SDK also failed
     }
 
     // Neither backend available
     throw new JamError(
       'Copilot provider not available.\n' +
-      '  Option 1: Install Copilot CLI: npm install -g @github/copilot\n' +
-      '  Option 2: Open a terminal in VSCode with the Jam extension installed.\n' +
+      '  Option 1: Open a terminal in VSCode with the Jam extension installed (recommended).\n' +
+      '  Option 2: Install Copilot CLI: npm install -g @github/copilot\n' +
       '  Option 3: Use a different provider: --provider ollama',
       'PROVIDER_UNAVAILABLE'
     );
