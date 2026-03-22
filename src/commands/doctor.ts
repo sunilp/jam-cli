@@ -125,4 +125,10 @@ export async function runDoctor(options: CliOverrides): Promise<void> {
   } else {
     process.stdout.write(chalk.yellow(`\n${failCount} issue${failCount === 1 ? '' : 's'} to fix.\n`));
   }
+
+  // Show a random tip when things are looking good
+  if (failCount === 0) {
+    const { pickFortune } = await import('./vibes.js');
+    process.stdout.write(chalk.dim(`\n  ${pickFortune()}\n`));
+  }
 }

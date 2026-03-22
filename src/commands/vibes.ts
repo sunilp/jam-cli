@@ -225,7 +225,7 @@ function pickSong(data: VibeData): string {
   return songs.find(s => s.cond)!.song;
 }
 
-function pickFortune(): string {
+export function pickFortune(): string {
   const fortunes = [
     '"A mass refactor is in your future. Resist."',
     '"Your tests pass, but do they test the right thing?"',
