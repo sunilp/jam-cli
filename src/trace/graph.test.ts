@@ -54,7 +54,7 @@ describe('traceSymbol', () => {
     });
 
     // Create symbol: sanitize (called by processData)
-    const sanitizeId = store.insertSymbol({
+    store.insertSymbol({
       name: 'sanitize',
       kind: 'function',
       file: 'src/utils.ts',

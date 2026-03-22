@@ -112,7 +112,7 @@ describe('CopilotProxyBackend integration (text response)', () => {
   it('returns text content with no tool calls and correct usage stats', async () => {
     const backend = new CopilotProxyBackend({ baseUrl: `http://127.0.0.1:${port}` });
 
-    const response = await backend.chatWithTools!(
+    const response = await backend.chatWithTools(
       [{ role: 'user', content: 'Say hello' }],
       [] // no tools — plain text scenario
     );

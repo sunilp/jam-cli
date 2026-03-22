@@ -24,6 +24,7 @@ import {
   formatImpactReport,
 } from '../trace/index.js';
 import type { CliOverrides } from '../config/schema.js';
+import type { ChalkInstance } from 'chalk';
 
 export interface TraceOptions extends CliOverrides {
   depth?: number;
@@ -78,7 +79,7 @@ async function runTraceV2(
   symbolName: string,
   options: TraceOptions,
   workspaceRoot: string,
-  chalk: typeof import('chalk').default,
+  chalk: ChalkInstance,
   write: (msg: string) => void,
 ): Promise<void> {
   const indexDir = join(workspaceRoot, '.jam', 'trace-index');
@@ -119,7 +120,7 @@ async function runTraceV2(
     const result = traceSymbol(store, symbolName, { depth });
 
     if (result.notFound) {
-      let errMsg = `Symbol "${symbolName}" not found in the workspace.`;
+      const errMsg = `Symbol "${symbolName}" not found in the workspace.`;
       let hint = 'Check the spelling, or try --reindex to rebuild the index.';
       if (result.candidates && result.candidates.length > 0) {
         hint += '\n\nDid you mean:';
@@ -248,7 +249,7 @@ async function runTraceLegacy(
   symbolName: string,
   options: TraceOptions,
   workspaceRoot: string,
-  chalk: typeof import('chalk').default,
+  chalk: ChalkInstance,
   write: (msg: string) => void,
 ): Promise<void> {
   // Build call graph

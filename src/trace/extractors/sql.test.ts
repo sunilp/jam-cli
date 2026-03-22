@@ -1,5 +1,6 @@
 // src/trace/extractors/sql.test.ts
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect } from 'vitest';
+import type Parser from 'tree-sitter';
 import { isTreeSitterAvailable, parseSource } from '../parser.js';
 import './sql.js'; // registers SqlExtractor
 import { getExtractor } from './base.js';
@@ -9,7 +10,7 @@ async function extract(source: string) {
   // SqlExtractor works via regex, so it doesn't strictly require tree-sitter.
   // We still call parseSource so the extract() signature receives a real (or
   // minimal) rootNode.  If tree-sitter is unavailable we construct a stub.
-  let rootNode: import('tree-sitter').SyntaxNode;
+  let rootNode: Parser.SyntaxNode;
 
   if (isTreeSitterAvailable()) {
     const tree = await parseSource(source, 'sql');
@@ -26,7 +27,7 @@ async function extract(source: string) {
       text: source,
       startPosition: { row: 0, column: 0 },
       endPosition: { row: 0, column: 0 },
-    } as unknown as import('tree-sitter').SyntaxNode;
+    } as unknown as Parser.SyntaxNode;
   }
 
   const extractor = getExtractor('sql');

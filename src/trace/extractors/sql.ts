@@ -38,12 +38,12 @@ function parseColumnList(raw: string): string[] {
     // Remove AS aliases: col AS alias → col
     .map(col => col.split(/\s+AS\s+/i)[0]!.trim())
     // Remove surrounding backticks/quotes
-    .map(col => col.replace(/^[`"'\[]|[`"'\]]$/g, ''))
+    .map(col => col.replace(/^[`"'[]|[`"']]$/g, ''))
     .filter(col => col.length > 0 && col !== '*');
 }
 
 /** Find the enclosing CREATE symbol name for a node, or return '<module>'. */
-function enclosingSymbol(node: Parser.SyntaxNode): string {
+function _enclosingSymbol(node: Parser.SyntaxNode): string {
   let current: Parser.SyntaxNode | null = node.parent;
   while (current) {
     // tree-sitter-sql may use different node type names; check common ones
@@ -171,7 +171,7 @@ function extractColumnsRegex(source: string): ExtractionResult['columns'] {
     // Parse assignment list: col1 = val1, col2 = val2
     const assignments = setPart.split(',');
     for (const assignment of assignments) {
-      const colPart = assignment.split('=')[0]!.trim().replace(/^[`"'\[]|[`"'\]]$/g, '');
+      const colPart = assignment.split('=')[0]!.trim().replace(/^[`"'[]|[`"']]$/g, '');
       if (colPart) {
         columns.push({ symbolName: '<module>', tableName, columnName: colPart, operation: 'UPDATE' });
       }

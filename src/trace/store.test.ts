@@ -104,9 +104,13 @@ describe('TraceStore', () => {
   it('drops and rebuilds on schema version mismatch', () => {
     store.close();
     // Manually corrupt the version
+    // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-unsafe-assignment
     const Database = require('better-sqlite3');
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call
     const db = new Database(join(dir, 'trace.db'));
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     db.exec('UPDATE schema_version SET version = 999');
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     db.close();
 
     // Re-open — should detect mismatch and rebuild

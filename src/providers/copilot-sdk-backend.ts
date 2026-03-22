@@ -325,7 +325,7 @@ function parseToolCalls(text: string): ToolCall[] | undefined {
       return [{
         id: `call_${Date.now()}`,
         name: parsed.tool,
-        arguments: (parsed.arguments ?? {}) as Record<string, unknown>,
+        arguments: parsed.arguments ?? {},
       }];
     }
   } catch {

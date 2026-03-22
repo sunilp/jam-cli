@@ -1,6 +1,6 @@
 // src/trace/extractors/python.ts
 import type Parser from 'tree-sitter';
-import { registerExtractor, findNodes, findNodesByTypes } from './base.js';
+import { registerExtractor, findNodes } from './base.js';
 import type { Extractor, ExtractionResult } from './base.js';
 
 /** Walk upward from a node to find the nearest enclosing function_definition. */

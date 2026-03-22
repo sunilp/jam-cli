@@ -39,7 +39,7 @@ describe('E2E: jam run with mock Copilot proxy', () => {
   });
 
   it('creates all requested Spring Boot files via tool calls', async () => {
-    const { stdout, stderr } = await execFileAsync(
+    const { stdout: _stdout, stderr: _stderr } = await execFileAsync(
       'node',
       [
         CLI_PATH,

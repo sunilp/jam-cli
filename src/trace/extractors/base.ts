@@ -1,5 +1,5 @@
 import type Parser from 'tree-sitter';
-import type { SymbolRecord, CallRecord, ImportRecord, ColumnRecord } from '../store.js';
+import type { SymbolRecord, ImportRecord } from '../store.js';
 
 /** Records extracted from a single file. */
 export interface ExtractionResult {

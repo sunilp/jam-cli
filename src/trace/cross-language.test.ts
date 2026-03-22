@@ -51,7 +51,7 @@ function populateStore(store: TraceStore): void {
   store.beginTransaction();
 
   // ── PaymentService.java symbols ──────────────────────────────────────────
-  const paymentServiceId = store.insertSymbol({
+  store.insertSymbol({
     name: 'PaymentService',
     kind: 'class',
     file: 'PaymentService.java',

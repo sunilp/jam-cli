@@ -716,7 +716,7 @@ async function legacyRun(instruction: string, options: RunOptions): Promise<void
         // ── Duplicate write nudge ──────────────────────────────────────
         // If the model has written the same file 3+ times, nudge it to move on.
         if (!wasError && tc.name === 'write_file' && typeof tc.arguments['path'] === 'string') {
-          const wPath = tc.arguments['path'] as string;
+          const wPath = tc.arguments['path'];
           fileWriteCounts.set(wPath, (fileWriteCounts.get(wPath) ?? 0) + 1);
           if (fileWriteCounts.get(wPath)! >= 3) {
             stderrLog(formatInternalStatus(

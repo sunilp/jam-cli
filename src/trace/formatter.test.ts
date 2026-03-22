@@ -1,6 +1,6 @@
 // src/trace/formatter.test.ts
 import { describe, it, expect } from 'vitest';
-import type { TraceResult, UpstreamNode } from './graph.js';
+import type { TraceResult } from './graph.js';
 import type { ImpactReport } from './impact.js';
 import {
   formatAsciiTree,

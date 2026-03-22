@@ -1,5 +1,5 @@
 // src/trace/extractors/python.test.ts
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { isTreeSitterAvailable, parseSource } from '../parser.js';
 import './python.js'; // registers PythonExtractor
 import { getExtractor } from './base.js';

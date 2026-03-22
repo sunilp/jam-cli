@@ -1,5 +1,5 @@
 // src/trace/extractors/java.test.ts
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { isTreeSitterAvailable, parseSource } from '../parser.js';
 import './java.js'; // registers JavaExtractor
 import { getExtractor } from './base.js';

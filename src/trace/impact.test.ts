@@ -38,7 +38,7 @@ describe('analyzeImpact', () => {
   });
 
   it('returns LOW risk for symbol with 1 caller and 0 columns', () => {
-    const targetId = store.insertSymbol({
+    store.insertSymbol({
       name: 'helper',
       kind: 'function',
       file: 'src/helper.ts',

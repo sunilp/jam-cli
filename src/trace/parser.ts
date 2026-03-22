@@ -7,6 +7,7 @@ const grammars = new Map<string, Parser.Language>();
 /** Check if tree-sitter native addon is available. */
 export function isTreeSitterAvailable(): boolean {
   try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-unsafe-assignment
     TreeSitter = require('tree-sitter');
     return true;
   } catch {
@@ -45,14 +46,18 @@ function loadGrammar(language: string): Parser.Language | null {
 
   try {
     // tree-sitter-typescript exports { typescript, tsx } for TS, and the JS grammar
+    // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-unsafe-assignment
     const mod = require(pkg);
     let grammar: Parser.Language;
 
     if (language === 'typescript') {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
       grammar = mod.typescript ?? mod;
     } else if (language === 'javascript') {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
       grammar = mod.javascript ?? mod;
     } else {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       grammar = mod;
     }
 
@@ -64,10 +69,10 @@ function loadGrammar(language: string): Parser.Language | null {
 }
 
 /** Parse source code and return the tree. Returns null if grammar unavailable. */
-export async function parseSource(
+export function parseSource(
   source: string,
   language: string,
-): Promise<Parser.Tree | null> {
+): Parser.Tree | null {
   if (!TreeSitter && !isTreeSitterAvailable()) return null;
 
   const grammar = loadGrammar(language);
