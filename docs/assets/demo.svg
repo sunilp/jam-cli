@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="560" viewBox="0 0 800 560">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#764ba2;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#f093fb;stop-opacity:1" />
+    </linearGradient>
+    <filter id="shadow" x="-4%" y="-4%" width="108%" height="108%">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <!-- Background gradient -->
+  <rect width="800" height="560" rx="0" fill="url(#bg)"/>
+
+  <!-- Terminal window -->
+  <rect x="32" y="28" width="736" height="504" rx="10" fill="#1e1e2e" filter="url(#shadow)"/>
+
+  <!-- Title bar -->
+  <rect x="32" y="28" width="736" height="36" rx="10" fill="#313244"/>
+  <rect x="32" y="54" width="736" height="10" fill="#313244"/>
+
+  <!-- Traffic lights -->
+  <circle cx="56" cy="46" r="6" fill="#f38ba8"/>
+  <circle cx="76" cy="46" r="6" fill="#f9e2af"/>
+  <circle cx="96" cy="46" r="6" fill="#a6e3a1"/>
+
+  <!-- Title text -->
+  <text x="400" y="51" text-anchor="middle" font-family="SF Mono, Menlo, monospace" font-size="12" fill="#cdd6f4">~/my-project</text>
+
+  <!-- Terminal content -->
+  <g font-family="SF Mono, Menlo, Consolas, monospace" font-size="13" fill="#cdd6f4">
+
+    <!-- Command -->
+    <text x="52" y="88"><tspan fill="#a6e3a1">$</tspan> jam trace updateBalance <tspan fill="#6c7086">--impact</tspan></text>
+
+    <!-- Section header -->
+    <text x="52" y="120" font-weight="bold" fill="#89b4fa">Impact Analysis for updateBalance</text>
+    <text x="52" y="138" fill="#585b70">═══════════════════════════════════════</text>
+
+    <!-- Direct callers -->
+    <text x="52" y="166">Direct callers:</text>
+    <text x="52" y="186">  → PaymentService.processRefund() <tspan fill="#585b70">[Java]</tspan> <tspan fill="#585b70">(line 142)</tspan></text>
+    <text x="52" y="206">  → BATCH_NIGHTLY_RECONCILE <tspan fill="#585b70">[SQL]</tspan> <tspan fill="#585b70">(line 34)</tspan></text>
+
+    <!-- Column dependents -->
+    <text x="52" y="236">Column dependents:</text>
+    <text x="52" y="256">  → VIEW v_customer_summary <tspan fill="#585b70">(reads customer.balance)</tspan></text>
+    <text x="52" y="276">  → PROC_MONTHLY_STATEMENT <tspan fill="#585b70">(reads customer.balance)</tspan></text>
+
+    <!-- Trigger chain -->
+    <text x="52" y="306">Trigger chain:</text>
+    <text x="52" y="326">  → TRG_CUSTOMER_AUDIT fires on UPDATE customer</text>
+
+    <!-- Risk -->
+    <text x="52" y="356">Risk: <tspan fill="#f9e2af" font-weight="bold">HIGH</tspan> — 2 callers across 2 languages, 2 column dependents</text>
+
+    <!-- Separator -->
+    <text x="52" y="386" fill="#585b70">───────────────────────────────────────────────────────</text>
+
+    <!-- Second command -->
+    <text x="52" y="416"><tspan fill="#a6e3a1">$</tspan> jam git wtf</text>
+    <text x="52" y="444"><tspan font-weight="bold">Branch:</tspan>  feat/auth-refactor <tspan fill="#585b70">(4 ahead of main)</tspan></text>
+    <text x="52" y="464"><tspan font-weight="bold">Staged:</tspan>  3 files — src/auth/*.ts</text>
+    <text x="52" y="484"><tspan fill="#a6e3a1" font-weight="bold">Suggestion:</tspan> Commit staged files, then rebase onto main.</text>
+
+    <!-- Prompt -->
+    <text x="52" y="514"><tspan fill="#a6e3a1">$</tspan> <tspan fill="#585b70">▊</tspan></text>
+  </g>
+</svg>
