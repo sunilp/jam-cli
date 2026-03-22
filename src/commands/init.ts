@@ -79,20 +79,20 @@ export async function runInit(options: InitOptions = {}): Promise<void> {
 
   try {
     write('\n');
-    write(chalk.bold('  Jam — Project Setup\n'));
-    write(chalk.dim('  ' + '─'.repeat(50) + '\n'));
+    write(chalk.bold('  Welcome to Jam.\n'));
+    write('\n');
+    write('  Let me figure out what you\'ve got...\n');
     write('\n');
 
     // Check workspace
     const workspaceRoot = await getWorkspaceRoot();
     const gitRepo = await isGitRepo(workspaceRoot);
 
-    write(`  Project root: ${chalk.cyan(workspaceRoot)}\n`);
-    write(`  Git repo:     ${gitRepo ? chalk.green('yes') : chalk.yellow('no')}\n`);
+    write(`  Project: ${chalk.cyan(workspaceRoot)}${gitRepo ? '' : chalk.yellow(' (not a git repo)')}\n`);
     write('\n');
 
     // Detect providers
-    write(chalk.bold('  Detecting providers...\n'));
+    write('  Scanning for providers...\n');
     write('\n');
 
     const providers = await detectProviders();
@@ -108,9 +108,9 @@ export async function runInit(options: InitOptions = {}): Promise<void> {
     write('\n');
 
     if (available.length === 0) {
-      write(chalk.yellow('  No providers detected. You can still configure one manually.\n'));
-      write(chalk.dim('  Start Ollama: ollama serve\n'));
-      write(chalk.dim('  Or set an API key: export ANTHROPIC_API_KEY=sk-ant-...\n'));
+      write(chalk.yellow('  No providers found yet. That\'s fine.\n'));
+      write(chalk.dim('  Start Ollama:  ollama serve\n'));
+      write(chalk.dim('  Or set a key:  export ANTHROPIC_API_KEY=sk-ant-...\n'));
       write('\n');
     }
 
@@ -122,7 +122,7 @@ export async function runInit(options: InitOptions = {}): Promise<void> {
       // Auto-select: first available provider, or ollama as fallback
       selectedProvider = available.length > 0 ? available[0]!.name : 'ollama';
       selectedModel = DEFAULT_MODELS[selectedProvider] ?? 'llama3.2';
-      write(`  Auto-selected: ${chalk.bold(selectedProvider)} (${selectedModel})\n`);
+      write(`  → Using ${chalk.bold(selectedProvider)} (${selectedModel})\n`);
     } else {
       const rl = createInterface({ input: process.stdin, output: process.stderr });
 
@@ -182,7 +182,7 @@ export async function runInit(options: InitOptions = {}): Promise<void> {
       write(chalk.yellow(`  .jamrc already exists — skipping config.\n`));
     } else {
       await writeFile(configPath, JSON.stringify(configContent, null, 2) + '\n');
-      write(`  ${chalk.green('[✓]')} Created ${chalk.cyan('.jamrc')}\n`);
+      write(`  ${chalk.green('✓')} Created ${chalk.cyan('.jamrc')} with your settings.\n`);
     }
 
     // Generate JAM.md
@@ -193,12 +193,12 @@ export async function runInit(options: InitOptions = {}): Promise<void> {
     } else {
       const content = await generateContextContent(workspaceRoot);
       const path = await writeContextFile(workspaceRoot, content);
-      write(`  ${chalk.green('[✓]')} Created ${chalk.cyan(CONTEXT_FILENAME)} at ${path}\n`);
+      write(`  ${chalk.green('✓')} Created ${chalk.cyan(CONTEXT_FILENAME)} for project context.\n`);
     }
 
     // Quick connectivity check
     write('\n');
-    write(chalk.bold('  Verifying setup...\n'));
+    write('  Checking connectivity...\n');
     write('\n');
 
     try {
@@ -209,17 +209,17 @@ export async function runInit(options: InitOptions = {}): Promise<void> {
         ...(selectedProvider === 'ollama' ? { baseUrl: 'http://localhost:11434' } : {}),
       });
       await adapter.validateCredentials();
-      write(`  ${chalk.green('[✓]')} ${selectedProvider} is reachable\n`);
+      write(`  ${chalk.green('✓')} ${selectedProvider} is reachable\n`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      write(`  ${chalk.red('[✗]')} ${selectedProvider} connection failed: ${chalk.dim(msg)}\n`);
+      write(`  ${chalk.red('✗')} ${selectedProvider} connection failed: ${chalk.dim(msg)}\n`);
       write(chalk.dim('      You can fix this later and run: jam doctor\n'));
     }
 
     write('\n');
     write(chalk.dim('  ' + '─'.repeat(50) + '\n'));
     write('\n');
-    await printSuccess('  Setup complete! Try: jam ask "hello"');
+    await printSuccess(`  Ready. Try: ${chalk.cyan('jam ask "how does this project work?"')}`);
     write('\n');
 
   } catch (err) {

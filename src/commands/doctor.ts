@@ -32,23 +32,23 @@ export async function runDoctor(options: CliOverrides): Promise<void> {
 
   const results = await Promise.all([
     // 1. Node.js version check
-    check('Node.js version >= 20', () => {
+    check('Node.js', () => {
       const version = process.version;
       const major = parseInt(version.slice(1).split('.')[0] ?? '0', 10);
       if (major < 20) {
         return Promise.resolve({ status: 'fail' as const, detail: `Node.js ${version} detected — upgrade to v20 or later` });
       }
-      return Promise.resolve({ status: 'pass' as const, detail: version });
+      return Promise.resolve({ status: 'pass' as const, detail: `${version} — solid.` });
     }),
 
     // 2. Config file parse check
-    check('Config file is valid', async () => {
+    check('Config', async () => {
       const config = await loadConfig(process.cwd(), options);
-      return { status: 'pass' as const, detail: `Active profile: "${config.defaultProfile}"` };
+      return { status: 'pass' as const, detail: `using "${config.defaultProfile}" profile.` };
     }),
 
     // 3. Provider connectivity
-    check('Provider connectivity', async () => {
+    check('Provider', async () => {
       const config = await loadConfig(process.cwd(), options);
       const profile = getActiveProfile(config);
       const adapter = await createProvider(profile);
@@ -56,11 +56,11 @@ export async function runDoctor(options: CliOverrides): Promise<void> {
       const via = profile.provider === 'copilot' && process.env['JAM_VSCODE_LM_PORT']
         ? 'copilot (via VSCode)'
         : profile.provider;
-      return { status: 'pass' as const, detail: `Provider: ${via}` };
+      return { status: 'pass' as const, detail: `${via} connected and ready.` };
     }),
 
     // 4. Copilot CLI availability
-    check('Copilot CLI (@github/copilot)', async () => {
+    check('Copilot CLI', async () => {
       try {
         const { stdout } = await execFileAsync('npx', ['@github/copilot', '--version'], { timeout: 15_000 });
         return { status: 'pass' as const, detail: stdout.trim() };
@@ -73,46 +73,42 @@ export async function runDoctor(options: CliOverrides): Promise<void> {
     }),
 
     // 5. ripgrep availability (optional)
-    check('ripgrep (rg) is available', async () => {
+    check('ripgrep', async () => {
       try {
         const { stdout } = await execFileAsync('rg', ['--version'], { timeout: 5000 });
         const firstLine = stdout.split('\n')[0]?.trim() ?? 'rg';
-        return { status: 'pass' as const, detail: firstLine };
+        return { status: 'pass' as const, detail: `${firstLine} — searches will be fast.` };
       } catch {
-        return { status: 'warn' as const, detail: 'Not installed — using JavaScript-based search (slower)' };
+        return { status: 'warn' as const, detail: 'Not installed — searches will be slower without it' };
       }
     }),
 
     // 6. Keytar availability (optional)
-    check('keytar (secure credential storage)', async () => {
+    check('Keychain', async () => {
       try {
         await import('keytar');
-        return { status: 'pass' as const, detail: 'loaded' };
+        return { status: 'pass' as const, detail: 'secrets are secure.' };
       } catch {
         return {
           status: 'warn' as const,
-          detail: 'Not available — API keys must be provided via environment variables or config',
+          detail: 'Not available — use env vars for API keys',
         };
       }
     }),
   ]);
 
-  process.stdout.write('\nJam Doctor — system diagnostics\n');
-  process.stdout.write(chalk.dim('─'.repeat(60) + '\n\n'));
+  process.stdout.write('\nChecking your setup...\n\n');
 
   for (const result of results) {
     let icon: string;
-    let label: string;
     if (result.status === 'pass') {
-      icon = chalk.green('[✓]');
-      label = chalk.green(result.description);
+      icon = chalk.green('  ✓');
     } else if (result.status === 'warn') {
-      icon = chalk.yellow('[!]');
-      label = chalk.yellow(result.description);
+      icon = chalk.yellow('  !');
     } else {
-      icon = chalk.red('[✗]');
-      label = chalk.red(result.description);
+      icon = chalk.red('  ✗');
     }
+    const label = result.status === 'fail' ? chalk.red(result.description) : result.description;
     const detail = result.detail ? chalk.dim(` — ${result.detail}`) : '';
     process.stdout.write(`${icon} ${label}${detail}\n`);
   }
@@ -123,12 +119,10 @@ export async function runDoctor(options: CliOverrides): Promise<void> {
   const warnCount = results.filter((r) => r.status === 'warn').length;
 
   if (failCount === 0 && warnCount === 0) {
-    process.stdout.write(chalk.green('All checks passed.\n'));
+    process.stdout.write(chalk.green('\nYou\'re good to go.\n'));
   } else if (failCount === 0) {
-    process.stdout.write(chalk.green(`All checks passed (${warnCount} optional).\n`));
+    process.stdout.write(chalk.green(`\nLooking good. ${warnCount} optional thing${warnCount === 1 ? '' : 's'} to improve.\n`));
   } else {
-    process.stdout.write(
-      chalk.yellow(`${failCount} check${failCount === 1 ? '' : 's'} failed, ${warnCount} optional.\n`)
-    );
+    process.stdout.write(chalk.yellow(`\n${failCount} issue${failCount === 1 ? '' : 's'} to fix.\n`));
   }
 }
