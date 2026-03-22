@@ -20,17 +20,24 @@
   "keywords": [
     "ai",
     "cli",
-    "assistant",
-    "terminal",
-    "ollama",
-    "embedded",
-    "llm",
     "developer-tools",
-    "code-review",
+    "code-intelligence",
+    "call-graph",
+    "impact-analysis",
+    "cross-language",
+    "trace",
     "agentic",
-    "streaming",
-    "chat",
-    "patch"
+    "code-review",
+    "ollama",
+    "copilot",
+    "openai",
+    "anthropic",
+    "typescript",
+    "python",
+    "java",
+    "sql",
+    "terminal",
+    "llm"
   ],
   "engines": {
     "node": ">=20"
