@@ -24,27 +24,9 @@ AI-powered agentic execution. 978 tests. Zero vendor lock-in.
 
 </div>
 
----
-
-```
-$ jam trace updateBalance --impact
-
-Impact Analysis for updateBalance
-═══════════════════════════════════
-
-Direct callers:
-  → PaymentService.processRefund() [Java] (line 142)
-  → BATCH_NIGHTLY_RECONCILE [SQL] (line 34)
-
-Column dependents:
-  → VIEW v_customer_summary (reads customer.balance)
-  → PROC_MONTHLY_STATEMENT (reads customer.balance)
-
-Trigger chain:
-  → TRG_CUSTOMER_AUDIT fires on UPDATE customer
-
-Risk: HIGH — 2 callers across 2 languages, 2 column dependents, 1 trigger
-```
+<div align="center">
+  <img src="docs/assets/demo.gif" alt="jam CLI demo — trace, git wtf, run" width="720">
+</div>
 
 ---
 

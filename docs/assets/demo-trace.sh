@@ -1,0 +1,12 @@
+#!/bin/bash
+printf '\n\033[1;36mImpact Analysis for updateBalance\033[0m\n'
+printf '\033[2m═══════════════════════════════════════\033[0m\n\n'
+printf 'Direct callers:\n'
+printf '  → PaymentService.processRefund() \033[2m[Java]\033[0m (line 142)\n'
+printf '  → BATCH_NIGHTLY_RECONCILE \033[2m[SQL]\033[0m (line 34)\n\n'
+printf 'Column dependents:\n'
+printf '  → VIEW v_customer_summary \033[2m(reads customer.balance)\033[0m\n'
+printf '  → PROC_MONTHLY_STATEMENT \033[2m(reads customer.balance)\033[0m\n\n'
+printf 'Trigger chain:\n'
+printf '  → TRG_CUSTOMER_AUDIT fires on UPDATE customer\n\n'
+printf 'Risk: \033[1;33mHIGH\033[0m — 2 callers across 2 languages, 2 column dependents, 1 trigger\n'
