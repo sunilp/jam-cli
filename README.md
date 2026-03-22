@@ -1,8 +1,17 @@
 <div align="center">
 
+```
+    ██╗  █████╗  ███╗   ███╗
+    ██║ ██╔══██╗ ████╗ ████║
+    ██║ ███████║ ██╔████╔██║
+██  ██║ ██╔══██║ ██║╚██╔╝██║
+╚████╔╝ ██║  ██║ ██║ ╚═╝ ██║
+ ╚═══╝  ╚═╝  ╚═╝ ╚═╝     ╚═╝
+```
+
 # jam
 
-**Cross-language code intelligence from your terminal.**
+**The developer-first AI CLI.** Cross-language code intelligence from your terminal.
 
 Trace call graphs across Java, SQL, Python, and TypeScript. Impact analysis.
 AI-powered agentic execution. 978 tests. Zero vendor lock-in.
