@@ -144,19 +144,24 @@ async function isCopilotCliInstalled(): Promise<boolean> {
  * The VSCode extension writes this file when the proxy starts.
  * Falls back to JAM_VSCODE_LM_PORT env var.
  */
-function readBridgePort(): string | null {
+interface BridgeInfo {
+  port: string;
+  model?: string;
+}
+
+function readBridgeInfo(): BridgeInfo | null {
   if (process.env['JAM_VSCODE_LM_PORT']) {
-    return process.env['JAM_VSCODE_LM_PORT'];
+    return { port: process.env['JAM_VSCODE_LM_PORT'] };
   }
   try {
     const bridgePath = join(homedir(), '.jam', 'copilot-bridge.json');
-    const data = JSON.parse(readFileSync(bridgePath, 'utf-8')) as { port?: number; pid?: number };
+    const data = JSON.parse(readFileSync(bridgePath, 'utf-8')) as { port?: number; pid?: number; model?: string };
     if (data.port) {
       // Verify the VSCode process is still running
       if (data.pid) {
         try { process.kill(data.pid, 0); } catch { return null; } // process gone
       }
-      return String(data.port);
+      return { port: String(data.port), model: data.model };
     }
   } catch { /* file doesn't exist or invalid */ }
   return null;
@@ -164,10 +169,10 @@ function readBridgePort(): string | null {
 
 async function detectBestProvider(): Promise<{ provider: string; model?: string } | null> {
   // 1. VSCode Copilot proxy (env var or bridge file)
-  const bridgePort = readBridgePort();
-  if (bridgePort) {
-    process.env['JAM_VSCODE_LM_PORT'] = bridgePort; // propagate for downstream use
-    return { provider: 'copilot' };
+  const bridge = readBridgeInfo();
+  if (bridge) {
+    process.env['JAM_VSCODE_LM_PORT'] = bridge.port; // propagate for downstream use
+    return { provider: 'copilot', model: bridge.model };
   }
 
   // 2. Copilot CLI (@github/copilot)

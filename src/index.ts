@@ -331,6 +331,15 @@ models
     await runModelsList({ profile: g.profile, provider: g.provider, baseUrl: g.baseUrl });
   });
 
+models
+  .command('set <model>')
+  .description('Set the default model for the current provider')
+  .action(async (model: string) => {
+    const g = globalOpts();
+    const { runModelsSet } = await import('./commands/models.js');
+    await runModelsSet(model, { profile: g.profile, provider: g.provider, baseUrl: g.baseUrl });
+  });
+
 // ── history ───────────────────────────────────────────────────────────────────
 const history = program.command('history').description('Manage chat session history');
 
