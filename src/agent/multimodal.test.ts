@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { getTextContent, hasImages, flattenForProvider, loadImage } from './multimodal.js';
 import type { AgentMessage } from './types.js';
+import os from 'node:os';
+import path from 'node:path';
 
 describe('getTextContent', () => {
   it('returns string content as-is', () => {
@@ -103,25 +105,25 @@ describe('flattenForProvider', () => {
 describe('loadImage', () => {
   it('loads a PNG file', async () => {
     const { writeFile, unlink } = await import('node:fs/promises');
-    const path = '/tmp/test-jam-multimodal.png';
-    await writeFile(path, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
-    const result = await loadImage(path);
+    const filePath = path.join(os.tmpdir(), 'test-jam-multimodal.png');
+    await writeFile(filePath, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    const result = await loadImage(filePath);
     expect(result.mediaType).toBe('image/png');
     expect(result.data).toBeTruthy();
     expect(typeof result.data).toBe('string'); // base64
-    await unlink(path);
+    await unlink(filePath);
   });
 
   it('detects JPEG media type', async () => {
     const { writeFile, unlink } = await import('node:fs/promises');
-    const path = '/tmp/test-jam-multimodal.jpg';
-    await writeFile(path, Buffer.from([0xFF, 0xD8, 0xFF]));
-    const result = await loadImage(path);
+    const filePath = path.join(os.tmpdir(), 'test-jam-multimodal.jpg');
+    await writeFile(filePath, Buffer.from([0xFF, 0xD8, 0xFF]));
+    const result = await loadImage(filePath);
     expect(result.mediaType).toBe('image/jpeg');
-    await unlink(path);
+    await unlink(filePath);
   });
 
   it('throws for non-existent file', async () => {
-    await expect(loadImage('/tmp/nonexistent-image-12345.png')).rejects.toThrow();
+    await expect(loadImage(path.join(os.tmpdir(), 'nonexistent-image-12345.png'))).rejects.toThrow();
   });
 });

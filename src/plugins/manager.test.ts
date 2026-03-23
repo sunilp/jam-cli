@@ -16,7 +16,8 @@ function createPlugin(
   writeFileSync(join(pluginDir, 'jam-plugin.json'), JSON.stringify({
     name, version, commands: [name],
   }));
-  writeFileSync(join(pluginDir, 'index.js'), code);
+  // Use .mjs so Node.js treats it as ESM regardless of package.json on Windows
+  writeFileSync(join(pluginDir, 'index.mjs'), code);
 }
 
 describe('PluginManager', () => {
@@ -78,8 +79,8 @@ describe('PluginManager', () => {
     writeFileSync(join(pluginDir, 'jam-plugin.json'), JSON.stringify({
       name: 'broken', version: '1.0.0', commands: [],
     }));
-    // Broken JS that doesn't export register
-    writeFileSync(join(pluginDir, 'index.js'), 'export const x = 1;');
+    // Broken JS that doesn't export register — use .mjs for cross-platform ESM
+    writeFileSync(join(pluginDir, 'index.mjs'), 'export const x = 1;');
 
     const manager = new PluginManager();
     await manager.loadAll([dir]);

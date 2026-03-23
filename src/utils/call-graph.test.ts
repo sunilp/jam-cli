@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   findDefinition,
@@ -11,6 +11,9 @@ import {
   formatMermaid,
   formatGraphForAI,
 } from './call-graph.js';
+
+/** Normalize a path to use forward slashes for cross-platform comparison. */
+const norm = (p: string) => p.replace(/\\/g, '/');
 
 // ── Test workspace setup ─────────────────────────────────────────────────────
 
@@ -92,7 +95,7 @@ describe('findDefinition', () => {
     expect(def).not.toBeNull();
     expect(def!.name).toBe('processData');
     expect(def!.kind).toBe('function');
-    expect(def!.file).toBe('src/processor.ts');
+    expect(norm(def!.file)).toBe('src/processor.ts');
     expect(def!.params).toContain('input: string');
     expect(def!.returnType).toContain('Promise<string>');
   });
@@ -113,7 +116,7 @@ describe('findDefinition', () => {
     const def = await findDefinition('Logger', workspace);
     expect(def).not.toBeNull();
     expect(def!.kind).toBe('class');
-    expect(def!.file).toBe('src/utils.ts');
+    expect(norm(def!.file)).toBe('src/utils.ts');
   });
 
   it('returns null for nonexistent symbol', async () => {
@@ -126,19 +129,21 @@ describe('findDefinition', () => {
 
 describe('findReferences', () => {
   it('finds call sites for processData', async () => {
-    const { callers, imports } = await findReferences('processData', 'src/processor.ts', workspace);
+    const defFile = ['src', 'processor.ts'].join(sep);
+    const { callers, imports } = await findReferences('processData', defFile, workspace);
 
     // handler.ts imports and calls processData
     expect(imports.length).toBeGreaterThanOrEqual(1);
-    expect(imports.some((i) => i.file === 'src/handler.ts')).toBe(true);
+    expect(imports.some((i) => norm(i.file) === 'src/handler.ts')).toBe(true);
 
     expect(callers.length).toBeGreaterThanOrEqual(2);
-    expect(callers.some((c) => c.file === 'src/handler.ts' && c.args.includes('body'))).toBe(true);
+    expect(callers.some((c) => norm(c.file) === 'src/handler.ts' && c.args.includes('body'))).toBe(true);
   });
 
   it('finds import references for handleRequest', async () => {
-    const { imports } = await findReferences('handleRequest', 'src/handler.ts', workspace);
-    expect(imports.some((i) => i.file === 'src/server.ts')).toBe(true);
+    const defFile = ['src', 'handler.ts'].join(sep);
+    const { imports } = await findReferences('handleRequest', defFile, workspace);
+    expect(imports.some((i) => norm(i.file) === 'src/server.ts')).toBe(true);
   });
 });
 
@@ -182,7 +187,7 @@ describe('buildCallGraph', () => {
     const graph = await buildCallGraph('processData', workspace, { depth: 2 });
 
     expect(graph.symbol.name).toBe('processData');
-    expect(graph.symbol.file).toBe('src/processor.ts');
+    expect(norm(graph.symbol.file)).toBe('src/processor.ts');
     expect(graph.callers.length).toBeGreaterThanOrEqual(2);
     expect(graph.imports.length).toBeGreaterThanOrEqual(1);
     expect(graph.callees.length).toBeGreaterThanOrEqual(1);
@@ -204,7 +209,7 @@ describe('formatAsciiTree', () => {
 
     expect(tree).toContain('processData');
     expect(tree).toContain('Defined:');
-    expect(tree).toContain('src/processor.ts');
+    expect(tree).toContain(['src', 'processor.ts'].join(sep));
   });
 });
 

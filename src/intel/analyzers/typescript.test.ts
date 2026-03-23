@@ -3,6 +3,9 @@ import { TypeScriptAnalyzer } from './typescript.js';
 
 const analyzer = new TypeScriptAnalyzer();
 
+/** Normalize a path to use forward slashes for cross-platform comparison. */
+const norm = (p: string) => p.replace(/\\/g, '/');
+
 describe('TypeScriptAnalyzer — metadata', () => {
   it('has correct name and extensions', () => {
     expect(analyzer.name).toBe('typescript');
@@ -169,7 +172,7 @@ describe('TypeScriptAnalyzer — import edges', () => {
     const code = `import { foo } from './foo.js';`;
     const { edges } = analyzer.analyzeFile(code, 'src/index.ts', '/root');
     const importEdge = edges.find(e => e.type === 'imports');
-    expect(importEdge!.target).toBe('file:src/foo.ts');
+    expect(norm(importEdge!.target)).toBe('file:src/foo.ts');
   });
 
   it('extracts relative import without extension', () => {
@@ -177,7 +180,7 @@ describe('TypeScriptAnalyzer — import edges', () => {
     const { edges } = analyzer.analyzeFile(code, 'src/index.ts', '/root');
     const importEdge = edges.find(e => e.type === 'imports');
     expect(importEdge).toBeDefined();
-    expect(importEdge!.target).toBe('file:src/utils.ts');
+    expect(norm(importEdge!.target)).toBe('file:src/utils.ts');
   });
 
   it('extracts require() as imports edge', () => {
@@ -206,7 +209,7 @@ describe('TypeScriptAnalyzer — import edges', () => {
     const code = `import { UserService } from './services/user.js';`;
     const { edges } = analyzer.analyzeFile(code, 'src/index.ts', '/root');
     const importEdge = edges.find(e => e.type === 'imports');
-    expect(importEdge!.target).toBe('file:src/services/user.ts');
+    expect(norm(importEdge!.target)).toBe('file:src/services/user.ts');
   });
 });
 
@@ -395,7 +398,7 @@ export default router;
     // Import edge (only relative imports)
     const importEdges = edges.filter(e => e.type === 'imports');
     expect(importEdges).toHaveLength(1);
-    expect(importEdges[0]!.target).toBe('file:src/routes/services/user.ts');
+    expect(norm(importEdges[0]!.target)).toBe('file:src/routes/services/user.ts');
 
     // Contains edges
     const containsEdges = edges.filter(e => e.type === 'contains');

@@ -18,14 +18,15 @@ function createPlugin(
   mkdirSync(pluginDir, { recursive: true });
   writeFileSync(join(pluginDir, 'jam-plugin.json'), JSON.stringify(manifest));
   if (indexContent) {
-    writeFileSync(join(pluginDir, 'index.js'), indexContent);
+    // Use .mjs so Node.js treats it as ESM regardless of package.json resolution on Windows
+    writeFileSync(join(pluginDir, 'index.mjs'), indexContent);
   }
   return pluginDir;
 }
 
 describe('discoverPlugins', () => {
   it('returns empty array for nonexistent directory', () => {
-    const result = discoverPlugins(['/tmp/no-such-dir-jam-test']);
+    const result = discoverPlugins([join(tmpdir(), 'no-such-dir-jam-test')]);
     expect(result).toEqual([]);
   });
 
@@ -114,7 +115,8 @@ describe('discoverPlugins', () => {
 describe('loadPluginModule', () => {
   it('loads a module with register function', async () => {
     const dir = createTempDir();
-    const entryPoint = join(dir, 'index.js');
+    // Use .mjs so Node.js treats it as ESM regardless of package.json on Windows
+    const entryPoint = join(dir, 'index.mjs');
     writeFileSync(entryPoint, 'export function register() { return "loaded"; }');
 
     const mod = await loadPluginModule(entryPoint);
@@ -123,7 +125,8 @@ describe('loadPluginModule', () => {
 
   it('throws for module without register', async () => {
     const dir = createTempDir();
-    const entryPoint = join(dir, 'index.js');
+    // Use .mjs so Node.js treats it as ESM regardless of package.json on Windows
+    const entryPoint = join(dir, 'index.mjs');
     writeFileSync(entryPoint, 'export const foo = 42;');
 
     await expect(loadPluginModule(entryPoint)).rejects.toThrow('register');

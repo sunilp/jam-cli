@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { detectSandboxStrategy, buildSandboxArgs, executeSandboxed } from './sandbox.js';
 import type { SandboxConfig } from './types.js';
+import os from 'node:os';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -54,14 +55,18 @@ describe('buildSandboxArgs', () => {
 
   it('returns shell wrapper for permissions-only', () => {
     const result = buildSandboxArgs('echo hello world', workspaceRoot, defaultConfig, 'permissions-only');
-    expect(result.command).toBe('/bin/sh');
-    expect(result.args).toEqual(['-c', 'echo hello world']);
+    const expectedShell = os.platform() === 'win32' ? 'cmd.exe' : '/bin/sh';
+    const expectedArgs = os.platform() === 'win32' ? ['/c', 'echo hello world'] : ['-c', 'echo hello world'];
+    expect(result.command).toBe(expectedShell);
+    expect(result.args).toEqual(expectedArgs);
   });
 
   it('returns shell wrapper for permissions-only with no-arg command', () => {
     const result = buildSandboxArgs('pwd', workspaceRoot, defaultConfig, 'permissions-only');
-    expect(result.command).toBe('/bin/sh');
-    expect(result.args).toEqual(['-c', 'pwd']);
+    const expectedShell = os.platform() === 'win32' ? 'cmd.exe' : '/bin/sh';
+    const expectedArgs = os.platform() === 'win32' ? ['/c', 'pwd'] : ['-c', 'pwd'];
+    expect(result.command).toBe(expectedShell);
+    expect(result.args).toEqual(expectedArgs);
   });
 
   it('includes network deny in sandbox-exec profile when network is blocked', () => {
