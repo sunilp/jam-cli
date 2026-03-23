@@ -41,7 +41,7 @@ export function runCommand(
     });
 
     const timer = setTimeout(() => {
-      child.kill('SIGTERM');
+      child.kill();
       reject(new Error(`Command timed out after ${timeoutMs}ms: ${command} ${args.join(' ')}`));
     }, timeoutMs);
 

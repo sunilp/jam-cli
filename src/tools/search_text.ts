@@ -42,7 +42,7 @@ function runRipgrep(
     });
 
     const timer = setTimeout(() => {
-      child.kill('SIGTERM');
+      child.kill();
       reject(new Error('ripgrep timed out'));
     }, SEARCH_TIMEOUT_MS);
 

@@ -64,11 +64,11 @@ export class StdioTransport extends EventEmitter {
     if (!this.process) return;
 
     this.process.stdin?.end();
-    this.process.kill('SIGTERM');
+    this.process.kill();
 
     await new Promise<void>((resolve) => {
       const timer = setTimeout(() => {
-        this.process?.kill('SIGKILL');
+        this.process?.kill();
         resolve();
       }, 3000);
       this.process!.on('close', () => {
