@@ -7,6 +7,7 @@
 
 import { execSync } from 'node:child_process';
 import chalk from 'chalk';
+import { isWindows, killProcess } from '../utils/platform.js';
 
 interface PortEntry {
   port: number;
@@ -20,6 +21,38 @@ interface PortEntry {
 function getListeningPorts(): PortEntry[] {
   const entries: PortEntry[] = [];
 
+  // ── Windows: netstat -ano ─────────────────────────────────────────────
+  if (isWindows()) {
+    try {
+      const raw = execSync('netstat -ano', { encoding: 'utf-8', timeout: 5000 });
+      const lines = raw.trim().split('\n');
+      for (const line of lines) {
+        const match = line.match(/^\s*TCP\s+\S+:(\d+)\s+\S+\s+LISTENING\s+(\d+)/);
+        if (!match) continue;
+        const port = parseInt(match[1]!, 10);
+        const pid = parseInt(match[2]!, 10);
+        if (pid === 0) continue;
+
+        let command = `PID ${pid}`;
+        try {
+          const taskInfo = execSync(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`, {
+            encoding: 'utf-8',
+            timeout: 3000,
+          }).trim();
+          const csvMatch = taskInfo.match(/^"([^"]+)"/);
+          if (csvMatch) command = csvMatch[1]!;
+        } catch { /* use fallback */ }
+
+        if (!entries.some((e) => e.port === port && e.pid === pid)) {
+          entries.push({ port, pid, process: command, command, protocol: 'TCP', state: 'LISTEN' });
+        }
+      }
+    } catch { /* netstat not available */ }
+
+    return entries.sort((a, b) => a.port - b.port);
+  }
+
+  // ── macOS / Linux ─────────────────────────────────────────────────────
   try {
     // macOS / Linux: use lsof
     const raw = execSync('lsof -iTCP -sTCP:LISTEN -P -n 2>/dev/null || true', {
@@ -134,7 +167,7 @@ export function runPorts(options: PortsOptions): void {
 
     for (const entry of entries) {
       try {
-        process.kill(entry.pid, 'SIGTERM');
+        if (!killProcess(entry.pid)) throw new Error('Kill failed');
         process.stdout.write(
           `Killed ${chalk.bold(entry.process)} (PID ${entry.pid}) on port ${chalk.yellow(String(port))}\n`,
         );
