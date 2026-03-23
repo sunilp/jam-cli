@@ -96,28 +96,59 @@ function countFiles(root: string): { files: number; lines: number; largest: { na
   return { files, lines, largest, langs };
 }
 
+function countTestFiles(root: string): number {
+  let count = 0;
+  function walk(dir: string): void {
+    let entries;
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (e.name.startsWith('.') || e.name === 'node_modules' || e.name === 'dist') continue;
+      const full = join(dir, e.name);
+      if (e.isDirectory()) { walk(full); continue; }
+      if (/\.(test|spec)\.(ts|js|tsx|jsx)$/.test(e.name)) count++;
+    }
+  }
+  walk(root);
+  return count;
+}
+
+function getDirectorySize(dir: string): string | null {
+  try { statSync(dir); } catch { return null; }
+  let total = 0;
+  function walk(d: string): void {
+    let entries;
+    try { entries = readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const full = join(d, e.name);
+      if (e.isDirectory()) { walk(full); continue; }
+      try { total += statSync(full).size; } catch { /* skip */ }
+    }
+  }
+  walk(dir);
+  if (total === 0) return null;
+  if (total < 1024 * 1024) return `${Math.round(total / 1024)}K`;
+  if (total < 1024 * 1024 * 1024) return `${Math.round(total / (1024 * 1024))}M`;
+  return `${(total / (1024 * 1024 * 1024)).toFixed(1)}G`;
+}
+
 function collectVibeData(root: string): VibeData {
   const { files, lines, largest, langs } = countFiles(root);
   const todoCount = countPattern(root, /\bTODO\b/gi);
   const fixmeCount = countPattern(root, /\bFIXME\b/gi);
   const hackCount = countPattern(root, /\bHACK\b/gi);
 
-  // Git stats
-  const commitsWeek = exec('git log --oneline --since="7 days ago" 2>/dev/null | wc -l', root).trim();
-  const commitsTotal = exec('git rev-list --count HEAD 2>/dev/null', root).trim();
-  const topContrib = exec('git shortlog -sn --no-merges HEAD 2>/dev/null | head -1', root)
-    .replace(/^\s*\d+\s+/, '').trim() || null;
+  // Git stats (cross-platform — no pipes or Unix utils)
+  const commitsWeekRaw = exec('git log --oneline --since="7 days ago"', root);
+  const commitsWeek = commitsWeekRaw ? String(commitsWeekRaw.split('\n').filter(Boolean).length) : '0';
+  const commitsTotal = exec('git rev-list --count HEAD', root).trim();
+  const shortlogRaw = exec('git shortlog -sn --no-merges HEAD', root);
+  const topContrib = (shortlogRaw.split('\n')[0] ?? '').replace(/^\s*\d+\s+/, '').trim() || null;
 
-  // Oldest TODO age
-  let oldestTodoAge: number | null = null;
-  const blameOutput = exec('git log --all --diff-filter=A -p --format="%at" 2>/dev/null | head -500', root);
-  if (!blameOutput) oldestTodoAge = null;
+  const oldestTodoAge: number | null = null;
 
-  // Test detection
-  let testCount = 0;
+  // Test detection (pure Node.js — works on Windows)
   const testsPassing: boolean | null = null;
-  const testOutput = exec('grep -r "it(" --include="*.test.ts" --include="*.test.js" --include="*.spec.ts" -l 2>/dev/null | wc -l', root);
-  testCount = parseInt(testOutput) || 0;
+  const testCount = countTestFiles(root);
 
   // Check for CI
   const hasCi = (() => {
@@ -135,8 +166,8 @@ function collectVibeData(root: string): VibeData {
     return false;
   })();
 
-  // node_modules size
-  const nmSize = exec('du -sh node_modules 2>/dev/null | cut -f1', root).trim() || null;
+  // node_modules size (cross-platform)
+  const nmSize = getDirectorySize(join(root, 'node_modules'));
 
   return {
     totalFiles: files,
