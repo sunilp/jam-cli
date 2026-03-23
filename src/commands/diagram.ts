@@ -57,7 +57,7 @@ function generateArchitectureDiagram(analysis: ProjectAnalysis, focus?: string):
   // Style entry-point modules
   const entryModules = new Set<string>();
   for (const ep of analysis.entryPoints) {
-    const parts = ep.split('/');
+    const parts = ep.split(/[\\/]/);
     if (parts[0] === 'src' && parts.length > 2) entryModules.add(parts[1]!);
     else entryModules.add('root');
   }
@@ -80,7 +80,7 @@ function generateArchitectureDiagram(analysis: ProjectAnalysis, focus?: string):
     const cyclicModules = new Set<string>();
     for (const cycle of analysis.cycles) {
       for (const file of cycle) {
-        const parts = file.split('/');
+        const parts = file.split(/[\\/]/);
         if (parts[0] === 'src' && parts.length > 2) cyclicModules.add(parts[1]!);
       }
     }
@@ -100,7 +100,7 @@ function generateDepsDiagram(analysis: ProjectAnalysis, focus?: string): string 
     const mod = analysis.modules.find((m) => m.name === focus);
     if (mod) {
       for (const file of mod.files.slice(0, 30)) {
-        const shortName = file.split('/').pop()!.replace(/\.[^.]+$/, '');
+        const shortName = file.split(/[\\/]/).pop()!.replace(/\.[^.]+$/, '');
         const safeId = shortName.replace(/[^a-zA-Z0-9]/g, '_');
         lines.push(`  ${safeId}["${shortName}"]`);
       }

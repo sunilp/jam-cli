@@ -85,7 +85,7 @@ export function generateArchitectureDiagram(graph: IntelGraph): string {
 
   for (const node of fileNodes) {
     const fp = node.filePath ?? node.name;
-    const parts = fp.split('/');
+    const parts = fp.split(/[\\/]/);
     const module = parts.length > 1 ? parts[0]! : 'root';
     const list = modules.get(module) ?? [];
     list.push(node);

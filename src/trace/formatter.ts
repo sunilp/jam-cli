@@ -106,7 +106,7 @@ export function formatMermaid(result: TraceResult): string {
 
   const sym = result.symbol;
   const defId = nodeId(sym.name, sym.file);
-  const shortFile = sym.file.split('/').slice(-2).join('/');
+  const shortFile = sym.file.split(/[\\/]/).slice(-2).join('/');
   lines.push(`  ${defId}["<b>${sym.name}</b><br/><i>${shortFile}:${sym.line}</i>"]`);
 
   // Callers → symbol
@@ -123,7 +123,7 @@ export function formatMermaid(result: TraceResult): string {
   for (const [key, info] of callerGroups) {
     const callerName = key.split('@')[0]!;
     const id = nodeId(callerName, info.file);
-    const sf = info.file.split('/').slice(-2).join('/');
+    const sf = info.file.split(/[\\/]/).slice(-2).join('/');
     lines.push(`  ${id}["${callerName}<br/><i>${sf}:${info.line}</i>"]`);
     const label = info.count > 1 ? `|"${info.count}x"|` : '';
     lines.push(`  ${id} --> ${label}${defId}`);

@@ -593,7 +593,7 @@ export function formatMermaid(graph: CallGraph): string {
   const nodeId = (name: string, file: string) => sanitize(`${name}_${file.replace(/[/.]/g, '_')}`);
 
   const defId = nodeId(graph.symbol.name, graph.symbol.file);
-  const shortFile = graph.symbol.file.split('/').slice(-2).join('/');
+  const shortFile = graph.symbol.file.split(/[\\/]/).slice(-2).join('/');
   lines.push(`  ${defId}["<b>${graph.symbol.name}</b><br/><i>${shortFile}:${graph.symbol.line}</i>"]`);
 
   // Callers → symbol
@@ -611,7 +611,7 @@ export function formatMermaid(graph: CallGraph): string {
   for (const [key, info] of callerGroups) {
     const callerName = key.split('@')[0]!;
     const id = nodeId(callerName, info.file);
-    const sf = info.file.split('/').slice(-2).join('/');
+    const sf = info.file.split(/[\\/]/).slice(-2).join('/');
     lines.push(`  ${id}["${callerName}<br/><i>${sf}:${info.line}</i>"]`);
     const label = info.count > 1 ? `|"${info.count}x"|` : '';
     lines.push(`  ${id} --> ${label}${defId}`);

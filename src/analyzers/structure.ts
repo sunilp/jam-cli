@@ -47,7 +47,7 @@ function groupIntoModules(sourceFiles: string[], root: string): ModuleInfo[] {
 
   for (const file of sourceFiles) {
     // Use the first meaningful directory as module name
-    const parts = file.split('/');
+    const parts = file.split(/[\\/]/);
     let moduleName: string;
 
     if (parts.length <= 1) {
@@ -78,7 +78,7 @@ function groupIntoModules(sourceFiles: string[], root: string): ModuleInfo[] {
     const firstFile = files[0]!;
     const directory = files.length === 1
       ? dirname(firstFile)
-      : dirname(firstFile).split('/').slice(0, 2).join('/');
+      : dirname(firstFile).split(/[\\/]/).slice(0, 2).join('/');
 
     modules.push({
       name,
@@ -100,7 +100,7 @@ function computeInterModuleDeps(
 ): Array<{ from: string; to: string; weight: number }> {
   const fileToModule = new Map<string, string>();
   for (const file of sourceFiles) {
-    const parts = file.split('/');
+    const parts = file.split(/[\\/]/);
     if (parts[0] === 'src' && parts.length > 2) {
       fileToModule.set(file, parts[1]!);
     } else if (parts.length > 1 && parts[0] !== 'src') {
