@@ -1,7 +1,7 @@
 import { cosmiconfig } from 'cosmiconfig';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { JamConfigSchema } from './schema.js';
 import { CONFIG_DEFAULTS } from './defaults.js';
 import type { JamConfig, CliOverrides, Profile } from './schema.js';
@@ -139,9 +139,34 @@ async function isCopilotCliInstalled(): Promise<boolean> {
  * Detect the best available provider when none is explicitly configured.
  * Priority: VSCode Copilot proxy > Copilot CLI > Anthropic > OpenAI > null (keep ollama default)
  */
-async function detectBestProvider(): Promise<{ provider: string; model?: string } | null> {
-  // 1. VSCode Copilot proxy (JAM_VSCODE_LM_PORT)
+/**
+ * Read the Copilot bridge port from ~/.jam/copilot-bridge.json.
+ * The VSCode extension writes this file when the proxy starts.
+ * Falls back to JAM_VSCODE_LM_PORT env var.
+ */
+function readBridgePort(): string | null {
   if (process.env['JAM_VSCODE_LM_PORT']) {
+    return process.env['JAM_VSCODE_LM_PORT'];
+  }
+  try {
+    const bridgePath = join(homedir(), '.jam', 'copilot-bridge.json');
+    const data = JSON.parse(readFileSync(bridgePath, 'utf-8')) as { port?: number; pid?: number };
+    if (data.port) {
+      // Verify the VSCode process is still running
+      if (data.pid) {
+        try { process.kill(data.pid, 0); } catch { return null; } // process gone
+      }
+      return String(data.port);
+    }
+  } catch { /* file doesn't exist or invalid */ }
+  return null;
+}
+
+async function detectBestProvider(): Promise<{ provider: string; model?: string } | null> {
+  // 1. VSCode Copilot proxy (env var or bridge file)
+  const bridgePort = readBridgePort();
+  if (bridgePort) {
+    process.env['JAM_VSCODE_LM_PORT'] = bridgePort; // propagate for downstream use
     return { provider: 'copilot' };
   }
 
