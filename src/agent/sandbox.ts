@@ -100,6 +100,9 @@ export function buildSandboxArgs(
 
     case 'permissions-only': {
       // Run through shell for consistent behavior across platforms.
+      if (process.platform === 'win32') {
+        return { command: 'cmd.exe', args: ['/c', command] };
+      }
       return { command: '/bin/sh', args: ['-c', command] };
     }
   }
@@ -149,7 +152,7 @@ export async function executeSandboxed(
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      child.kill('SIGKILL');
+      child.kill();
       resolve({ stdout: '', stderr: 'Process timed out', exitCode: -1 });
     }, timeoutMs);
   });
