@@ -59,7 +59,10 @@ async function resolveGithubToken(apiKey?: string): Promise<string | undefined> 
  */
 export async function isCopilotCliAvailable(): Promise<boolean> {
   try {
-    await execFileAsync('npx', ['@github/copilot', '--version'], { timeout: 30_000 });
+    await execFileAsync('npx', ['@github/copilot', '--version'], {
+      timeout: 30_000,
+      shell: process.platform === 'win32',
+    });
     return true;
   } catch {
     return false;

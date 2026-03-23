@@ -62,7 +62,10 @@ export async function runDoctor(options: CliOverrides): Promise<void> {
     // 4. Copilot CLI availability
     check('Copilot CLI', async () => {
       try {
-        const { stdout } = await execFileAsync('npx', ['@github/copilot', '--version'], { timeout: 15_000 });
+        const { stdout } = await execFileAsync('npx', ['@github/copilot', '--version'], {
+          timeout: 15_000,
+          shell: process.platform === 'win32',
+        });
         return { status: 'pass' as const, detail: stdout.trim() };
       } catch {
         return {

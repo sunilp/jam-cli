@@ -238,6 +238,7 @@ async function checkTypecheck(cwd: string): Promise<{ status: CheckResult['statu
       cwd,
       timeout: 60_000,
       maxBuffer: 2 * 1024 * 1024,
+      shell: process.platform === 'win32',
     });
     return { status: 'pass', message: 'No type errors' };
   } catch (err) {

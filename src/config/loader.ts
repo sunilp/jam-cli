@@ -126,6 +126,7 @@ async function isCopilotCliInstalled(): Promise<boolean> {
     execFileSync('npx', ['@github/copilot', '--version'], {
       timeout: 15_000,
       stdio: 'pipe',
+      shell: process.platform === 'win32',
     });
     _copilotCliCache = true;
   } catch {
