@@ -42,3 +42,73 @@ jobs:
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  update-homebrew:
+    name: Update Homebrew Formula
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Wait for npm registry propagation
+        run: sleep 30
+
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download tarball and compute SHA
+        id: sha
+        run: |
+          URL="https://registry.npmjs.org/@sunilp-org/jam-cli/-/jam-cli-${{ steps.version.outputs.version }}.tgz"
+          # Retry up to 3 times in case registry hasn't propagated yet
+          for i in 1 2 3; do
+            HTTP_CODE=$(curl -s -o /tmp/jam.tgz -w "%{http_code}" "$URL")
+            if [ "$HTTP_CODE" = "200" ]; then break; fi
+            echo "Attempt $i: got $HTTP_CODE, retrying in 15s..."
+            sleep 15
+          done
+          SHA=$(sha256sum /tmp/jam.tgz | awk '{print $1}')
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout homebrew-tap
+        uses: actions/checkout@v5
+        with:
+          repository: sunilp/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update formula
+        run: |
+          cat > homebrew-tap/Formula/jam-cli.rb << 'FORMULA'
+          class JamCli < Formula
+            desc "Developer-first AI CLI for cross-language code intelligence"
+            homepage "https://jam.sunilprakash.com"
+            url "${{ steps.sha.outputs.url }}"
+            sha256 "${{ steps.sha.outputs.sha256 }}"
+            license "MIT"
+
+            depends_on "node@20"
+
+            def install
+              system "npm", "install", *std_npm_args
+              bin.install_symlink Dir["#{libexec}/bin/*"]
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/jam --version")
+            end
+          end
+          FORMULA
+
+      - name: Push formula update
+        working-directory: homebrew-tap
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/jam-cli.rb
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit -m "chore: bump jam-cli to ${{ steps.version.outputs.version }}"
+          git push
