@@ -27,11 +27,24 @@ const {
   deleteSession,
 } = await import('./history.js');
 
+let savedAppData: string | undefined;
+
 beforeEach(async () => {
   fakeHome = await mkdtemp(join(tmpdir(), 'jam-history-test-'));
+  // On Windows, getSessionDir() uses APPDATA instead of homedir().
+  // Point it at fakeHome so tests are fully isolated.
+  savedAppData = process.env['APPDATA'];
+  if (process.platform === 'win32') {
+    process.env['APPDATA'] = fakeHome;
+  }
 });
 
 afterEach(() => {
+  if (savedAppData !== undefined) {
+    process.env['APPDATA'] = savedAppData;
+  } else {
+    delete process.env['APPDATA'];
+  }
   rmSync(fakeHome, { recursive: true, force: true });
 });
 
