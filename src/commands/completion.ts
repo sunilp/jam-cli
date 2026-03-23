@@ -115,7 +115,47 @@ function generateZshCompletion(): string {
   ].join('\n');
 }
 
+function generatePowerShellCompletion(): string {
+  const commandList = JAM_COMMANDS.map((cmd) => `'${cmd}'`).join(', ');
+  return [
+    '# PowerShell completion for jam',
+    '# Add this to your $PROFILE',
+    '',
+    'Register-ArgumentCompleter -CommandName jam -ScriptBlock {',
+    '  param($wordToComplete, $commandAst, $cursorPosition)',
+    `  $commands = @(${commandList})`,
+    '  $subcommands = @{',
+    "    'auth' = @('login', 'logout')",
+    "    'config' = @('show', 'init')",
+    "    'models' = @('list')",
+    "    'history' = @('list', 'show')",
+    "    'completion' = @('install')",
+    '  }',
+    '',
+    '  $tokens = $commandAst.ToString().Split()',
+    '  if ($tokens.Count -le 2) {',
+    '    $commands | Where-Object { $_ -like "$wordToComplete*" } |',
+    '      ForEach-Object { [System.Management.Automation.CompletionResult]::new($_, $_, "ParameterValue", $_) }',
+    '  } else {',
+    '    $sub = $tokens[1]',
+    '    if ($subcommands.ContainsKey($sub)) {',
+    '      $subcommands[$sub] | Where-Object { $_ -like "$wordToComplete*" } |',
+    '        ForEach-Object { [System.Management.Automation.CompletionResult]::new($_, $_, "ParameterValue", $_) }',
+    '    }',
+    '  }',
+    '}',
+  ].join('\n');
+}
+
 function detectShell(): string {
+  // Windows: check for PowerShell indicators
+  if (process.platform === 'win32') {
+    if (process.env['PSModulePath']) return 'powershell';
+    const comspec = process.env['ComSpec'] ?? '';
+    if (comspec.toLowerCase().includes('cmd.exe')) return 'cmd';
+    return 'powershell';
+  }
+
   const shellEnv = process.env['SHELL'] ?? '';
   if (shellEnv.includes('zsh')) return 'zsh';
   if (shellEnv.includes('bash')) return 'bash';
@@ -151,10 +191,24 @@ export function runCompletionInstall(options: { shell?: string }): void {
     process.stdout.write(`  jam completion install --shell bash > ${completionFile}\n`);
     process.stdout.write(`  echo 'source ${completionFile}' >> ${rcFile}\n`);
     process.stdout.write(`  source ${rcFile}\n`);
+  } else if (shell === 'powershell') {
+    const script = generatePowerShellCompletion();
+
+    process.stdout.write('PowerShell completion script for jam:\n\n');
+    process.stdout.write(script + '\n\n');
+    process.stdout.write('To install:\n\n');
+    process.stdout.write('  Add the script above to your PowerShell profile.\n');
+    process.stdout.write('  To find your profile path, run: echo $PROFILE\n');
+    process.stdout.write('  Then reload: . $PROFILE\n');
+  } else if (shell === 'cmd') {
+    process.stdout.write(
+      'Command Prompt does not support tab completion for custom commands.\n' +
+      'Use PowerShell instead: jam completion install --shell powershell\n'
+    );
   } else {
     process.stderr.write(
-      `Unsupported shell: "${shell}". Supported: bash, zsh.\n` +
-        `Use --shell bash or --shell zsh.\n`
+      `Unsupported shell: "${shell}". Supported: bash, zsh, powershell.\n` +
+        `Use --shell bash, --shell zsh, or --shell powershell.\n`
     );
     process.exit(1);
   }
