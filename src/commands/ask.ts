@@ -218,6 +218,8 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
         maxTokens: profile.maxTokens,
       });
 
+      let skipToolLoop = false;
+
       if (structuredPlan) {
         stderrLog(formatExecutionPlanBlock(structuredPlan, noColor) + '\n');
         enrichedPrompt = enrichUserPromptWithPlan(prompt, structuredPlan);
@@ -231,7 +233,10 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
         if (searchPlan) {
           stderrLog(formatPlanBlock(searchPlan, noColor) + '\n');
         } else {
-          stderrLog(formatInternalStatus('planning skipped — using generic search strategy', noColor) + '\n');
+          // No plan at all — question likely isn't code-related.
+          // Skip the tool loop and answer directly.
+          stderrLog(formatInternalStatus('no codebase search needed — answering directly', noColor) + '\n');
+          skipToolLoop = true;
         }
         enrichedPrompt = enrichUserPrompt(prompt, searchPlan);
       }
@@ -242,10 +247,12 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
       let currentStepIdx = 0;
       const stepVerifier = new StepVerifier();
 
-      const MAX_TOOL_ROUNDS = 15;
+      const MAX_TOOL_ROUNDS = skipToolLoop ? 0 : 15;
       let synthesisInjected = false;
 
-      stderrLog(formatSeparator('Searching codebase', noColor));
+      if (!skipToolLoop) {
+        stderrLog(formatSeparator('Searching codebase', noColor));
+      }
 
       for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
         // ── Step injection: remind model of the current plan step ─────────
@@ -443,9 +450,11 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
         }
       }
 
-      // Exceeded round limit — fall through to streaming
+      // Exceeded round limit or skipped — fall through to streaming
       await mcpManager.shutdown();
-      stderrLog(formatSeparator('Max tool rounds reached, generating answer', noColor));
+      if (!skipToolLoop) {
+        stderrLog(formatSeparator('Max tool rounds reached, generating answer', noColor));
+      }
     }
 
     // ── Standard streaming response ───────────────────────────────────────────
