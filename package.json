@@ -1,6 +1,6 @@
 {
   "name": "@sunilp-org/jam-cli",
-  "version": "0.11.2",
+  "version": "0.11.3",
   "description": "Developer-first AI CLI for cross-language code intelligence. Trace call graphs across Java, SQL, Python, TypeScript. Impact analysis, agentic execution, code review, git tools, 40+ commands. Works with Ollama, Copilot, OpenAI, Anthropic.",
   "type": "module",
   "license": "MIT",
