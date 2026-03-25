@@ -177,6 +177,8 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
           ? 'You are a helpful, knowledgeable AI assistant. Answer the user\'s question directly, concisely, and accurately. Format your response in clean Markdown when helpful.'
           : undefined);
 
+    let enrichedPrompt: string | undefined;
+
     if (useTools && adapter.chatWithTools) {
       const noColor = options.noColor ?? false;
       const mcpManager = await createMcpManager(config.mcpServers, stderrLog, config.mcpGroups);
@@ -209,8 +211,6 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
       const projectCtxForPlan = [jamContext ?? workspaceCtx, symbolHint, pastContext].filter(Boolean).join('\n\n');
 
       let structuredPlan: ExecutionPlan | null = null;
-      let enrichedPrompt: string;
-
       // Try to produce a structured JSON execution plan
       structuredPlan = await generateExecutionPlan(adapter, prompt, projectCtxForPlan, {
         model: profile.model,
@@ -458,8 +458,11 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
     }
 
     // ── Standard streaming response ───────────────────────────────────────────
+    // Use enriched prompt (with project context) when available from the
+    // planning phase — keeps project awareness for non-code questions.
+    const finalPrompt = enrichedPrompt ?? prompt;
     const request = {
-      messages: [{ role: 'user' as const, content: prompt }],
+      messages: [{ role: 'user' as const, content: finalPrompt }],
       model: profile.model,
       temperature: profile.temperature,
       maxTokens: profile.maxTokens,
