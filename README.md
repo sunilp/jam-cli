@@ -14,7 +14,7 @@
 **The developer-first AI CLI.** Cross-language code intelligence from your terminal.
 
 Trace call graphs across Java, SQL, Python, and TypeScript. Impact analysis.
-AI-powered agentic execution. 978 tests. Zero vendor lock-in.
+AI-powered agentic execution. Works with Copilot & Gemini. Windows, macOS, Linux.
 
 [![CI](https://github.com/sunilp/jam-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/sunilp/jam-cli/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@sunilp-org/jam-cli.svg)](https://www.npmjs.com/package/@sunilp-org/jam-cli)
@@ -43,8 +43,9 @@ Jam isn't a generic AI assistant. It's the senior dev who's seen everything — 
 - 🔧 **Git toolkit** — `wtf` explains state, `undo` reverses mistakes, `standup` shows your work
 - ✅ **Verification** — scan for secrets, lint, type-check before you commit
 - 🧰 **19 zero-LLM utilities** — `ports`, `stats`, `deps`, `todo`, `hash`, `json`, `env`, and more
-- 🔌 **Any provider** — Ollama, OpenAI, Anthropic, Groq, GitHub Copilot — or bring your own
+- 🔌 **Any provider** — Copilot, Gemini, Ollama, OpenAI, Anthropic, Groq — or bring your own
 - 🏠 **Local-first** — your code never leaves your machine unless you choose a remote provider
+- 🖥️ **Cross-platform** — Windows (PowerShell, cmd), macOS, Linux
 - 🔗 **MCP + plugins** — connect to Model Context Protocol servers, drop in custom commands
 
 ---
@@ -62,17 +63,20 @@ brew tap sunilp/tap && brew install jam-cli
 npx @sunilp-org/jam-cli doctor
 ```
 
-Jam auto-detects the best available AI provider:
+Jam auto-detects the best available AI provider — **no API keys needed** if you have Copilot or Gemini:
 
 | Priority | Provider | Setup |
 |----------|----------|-------|
-| 1 | **GitHub Copilot** | VSCode extension or Copilot CLI installed |
-| 2 | **Anthropic** | `export ANTHROPIC_API_KEY=sk-ant-...` |
-| 3 | **OpenAI** | `export OPENAI_API_KEY=sk-...` |
-| 4 | **Ollama** (default) | `ollama serve` + `ollama pull llama3.2` |
+| 1 | **GitHub Copilot** | VSCode extension — zero config |
+| 2 | **Gemini Code Assist** | VSCode extension — zero config |
+| 3 | **Anthropic** | `export ANTHROPIC_API_KEY=sk-ant-...` |
+| 4 | **OpenAI** | `export OPENAI_API_KEY=sk-...` |
+| 5 | **Ollama** (default) | `ollama serve` + `ollama pull llama3.2` |
 
 ```bash
-jam doctor    # verify everything works
+jam doctor           # verify everything works
+jam models list      # see available models
+jam models set gpt-4o  # set your preferred model
 ```
 
 ---
@@ -177,7 +181,8 @@ jam commit
 - All commands in the Command Palette
 - `@jam` chat participant in GitHub Copilot Chat
 - TODO tree in the sidebar with click-to-navigate
-- Copilot auto-detected as AI provider — zero configuration
+- **Copilot or Gemini** auto-detected — zero configuration, no API keys
+- Status bar indicator shows connection state
 - Keeps jam-cli updated automatically
 
 ---
