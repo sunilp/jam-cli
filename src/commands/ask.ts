@@ -43,6 +43,7 @@ export interface AskOptions extends CliOverrides {
   json?: boolean;
   noColor?: boolean;
   quiet?: boolean;
+  verbose?: boolean;
   system?: string;
   /** Enable read-only tool use so the model can discover and read files.
    *  Defaults to true when stdout is a TTY and the provider supports chatWithTools. */
@@ -140,7 +141,17 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
     }
 
     // Quiet mode: suppress all non-essential stderr output
-    const stderrLog = options.quiet ? (_msg: string) => {} : (msg: string) => process.stderr.write(msg);
+    // Logging: --quiet suppresses all, --verbose shows everything, default shows summary
+    const verbose = options.verbose ?? false;
+    const stderrLog = options.quiet
+      ? (_msg: string) => {}
+      : verbose
+        ? (msg: string) => process.stderr.write(msg)
+        : (_msg: string) => {};
+    // Summary log: shown by default (unless --quiet), for key status updates only
+    const summaryLog = options.quiet
+      ? (_msg: string) => {}
+      : (msg: string) => process.stderr.write(msg);
 
     // Load config with CLI overrides
     const cliOverrides: CliOverrides = {
@@ -207,6 +218,7 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
       } catch { /* non-fatal */ }
 
       // ── Planning phase: structured plan first, text plan fallback ────────
+      summaryLog(formatInternalStatus('Thinking…', noColor) + '\n');
       stderrLog(formatSeparator('Planning', noColor));
       const projectCtxForPlan = [jamContext ?? workspaceCtx, symbolHint, pastContext].filter(Boolean).join('\n\n');
 
@@ -251,6 +263,7 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
       let synthesisInjected = false;
 
       if (!skipToolLoop) {
+        summaryLog(formatInternalStatus('Searching codebase…', noColor) + '\n');
         stderrLog(formatSeparator('Searching codebase', noColor));
       }
 
@@ -318,7 +331,7 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
               stderrLog(formatInternalStatus('Evaluating answer quality…', noColor) + '\n');
               const verdict = await criticEvaluate(adapter, prompt, finalText, { model: profile.model });
               if (verdict.pass) {
-                stderrLog(formatSeparator('Answer', noColor));
+                summaryLog('\n');
                 await renderFinalAnswer(finalText, response.usage, options, profile, noColor, stderrLog);
                 const log = memory.getAccessLog();
                 updateContextWithUsage(workspaceRoot, log.readFiles, log.searchQueries).catch(() => {});
@@ -356,7 +369,7 @@ export async function runAsk(inlinePrompt: string | undefined, options: AskOptio
             }
           }
 
-          stderrLog(formatSeparator('Answer', noColor));
+          summaryLog('\n');
           await renderFinalAnswer(finalText, response.usage, options, profile, noColor, stderrLog);
           const log = memory.getAccessLog();
           updateContextWithUsage(workspaceRoot, log.readFiles, log.searchQueries).catch(() => {});

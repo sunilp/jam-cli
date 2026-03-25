@@ -56,6 +56,7 @@ program
   .option('--json', 'output response as JSON')
   .option('--system <prompt>', 'override the system prompt')
   .option('--no-tools', 'disable read-only tool use (file discovery off)')
+  .option('-v, --verbose', 'show detailed planning and search logs')
   .action(async (prompt: string | undefined, cmdOpts: Record<string, unknown>) => {
     const g = globalOpts();
     const { runAsk } = await import('./commands/ask.js');
@@ -66,6 +67,7 @@ program
       baseUrl: g.baseUrl,
       noColor: g.color === false,
       quiet: g.quiet,
+      verbose: cmdOpts['verbose'] as boolean | undefined,
       file: cmdOpts['file'] as string | undefined,
       json: cmdOpts['json'] as boolean | undefined,
       system: cmdOpts['system'] as string | undefined,
