@@ -1038,6 +1038,45 @@ gitCmd
     runGitOops();
   });
 
+// ── browser ──────────────────────────────────────────────────────────────────
+const browserCmd = program
+  .command('browser')
+  .description('AI-driven browser automation via Playwright');
+
+browserCmd
+  .command('launch [prompt]')
+  .description('Launch an interactive AI-driven browser session')
+  .option('--url <url>', 'open browser at this URL')
+  .action(async (prompt: string | undefined, cmdOpts: Record<string, unknown>) => {
+    const g = globalOpts();
+    const { runBrowserLaunch } = await import('./commands/browser.js');
+    await runBrowserLaunch({
+      profile: g.profile,
+      provider: g.provider,
+      model: g.model,
+      baseUrl: g.baseUrl,
+      url: cmdOpts['url'] as string | undefined,
+    }, prompt);
+  });
+
+browserCmd
+  .command('record')
+  .description('Launch browser and record all interactions to a session file')
+  .option('--url <url>', 'open browser at this URL')
+  .option('--output <path>', 'output file path for the session recording')
+  .action(async (cmdOpts: Record<string, unknown>) => {
+    const g = globalOpts();
+    const { runBrowserRecord } = await import('./commands/browser.js');
+    await runBrowserRecord({
+      profile: g.profile,
+      provider: g.provider,
+      model: g.model,
+      baseUrl: g.baseUrl,
+      url: cmdOpts['url'] as string | undefined,
+      output: cmdOpts['output'] as string | undefined,
+    });
+  });
+
 // ── vibes (hidden easter egg) ────────────────────────────────────────────
 program
   .command('vibes', { hidden: true })
