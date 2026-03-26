@@ -98,6 +98,19 @@ export async function runDoctor(options: CliOverrides): Promise<void> {
         };
       }
     }),
+
+    // 7. Playwright MCP (informational only — never fails)
+    check('Playwright MCP', async () => {
+      try {
+        await execFileAsync('npx', ['@anthropic-ai/mcp-playwright', '--help'], {
+          timeout: 15_000,
+          shell: process.platform === 'win32',
+        });
+        return { status: 'pass' as const, detail: 'available — jam browser ready.' };
+      } catch {
+        return { status: 'warn' as const, detail: 'not found (needed for jam browser commands)' };
+      }
+    }),
   ]);
 
   process.stdout.write('\nChecking your setup...\n\n');
