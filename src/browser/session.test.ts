@@ -99,6 +99,30 @@ describe('BrowserSession', () => {
       expect(result).toBe('exit');
     });
 
+    it('should return "exit" for /quit', async () => {
+      await session.start();
+      const result = await session.handleSlashCommand('/quit');
+      expect(result).toBe('exit');
+    });
+
+    it('should handle /url', async () => {
+      await session.start();
+      const result = await session.handleSlashCommand('/url');
+      expect(result).toBe('handled');
+    });
+
+    it('should handle /status', async () => {
+      await session.start();
+      const result = await session.handleSlashCommand('/status');
+      expect(result).toBe('handled');
+    });
+
+    it('should handle /help', async () => {
+      await session.start();
+      const result = await session.handleSlashCommand('/help');
+      expect(result).toBe('handled');
+    });
+
     it('should return "unknown" for unrecognized commands', async () => {
       await session.start();
       const result = await session.handleSlashCommand('/foo');

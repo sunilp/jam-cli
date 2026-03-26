@@ -64,8 +64,8 @@ export class SessionRecorder {
 
   private computeDuration(): string {
     if (this.steps.length < 2) return '0s';
-    const first = new Date(this.steps[0].timestamp).getTime();
-    const last = new Date(this.steps[this.steps.length - 1].timestamp).getTime();
+    const first = new Date(this.steps[0]!.timestamp).getTime();
+    const last = new Date(this.steps[this.steps.length - 1]!.timestamp).getTime();
     const seconds = Math.round((last - first) / 1000);
     if (seconds < 60) return `${seconds}s`;
     const minutes = Math.floor(seconds / 60);
