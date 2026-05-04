@@ -15,3 +15,8 @@ docs/superpowers/
 .superpowers/
 
 .jam/
+
+# Local AI/editor agent config — never commit Claude/skill artifacts
+progress-tracker.md
+REQUIREMENTS.md
+.worktrees/
