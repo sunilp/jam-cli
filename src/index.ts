@@ -218,6 +218,35 @@ program
     });
   });
 
+// ── impact ───────────────────────────────────────────────────────────────────
+program
+  .command('impact [symbol]')
+  .description('Show cross-language impact of changing a symbol or column (shortcut for `trace --impact`)')
+  .option('--depth <n>', 'upstream chain depth (default: 10)', '10')
+  .option('--no-ai', 'skip AI analysis')
+  .option('--json', 'output as JSON')
+  .option('--reindex', 'force rebuild trace index')
+  .option('--lang <lang>', 'override language detection')
+  .option('--mermaid', 'output as Mermaid diagram')
+  .action(async (symbol: string | undefined, cmdOpts: Record<string, unknown>) => {
+    const g = globalOpts();
+    const { runImpact } = await import('./commands/impact.js');
+    await runImpact(symbol, {
+      profile: g.profile,
+      provider: g.provider,
+      model: g.model,
+      baseUrl: g.baseUrl,
+      noColor: g.color === false,
+      quiet: g.quiet,
+      depth: cmdOpts['depth'] ? parseInt(String(cmdOpts['depth']), 10) : undefined,
+      noAi: cmdOpts['ai'] === false,
+      json: cmdOpts['json'] as boolean | undefined,
+      reindex: cmdOpts['reindex'] as boolean | undefined,
+      lang: cmdOpts['lang'] as string | undefined,
+      mermaid: cmdOpts['mermaid'] as boolean | undefined,
+    });
+  });
+
 // ── mcp ──────────────────────────────────────────────────────────────────
 const mcp = program.command('mcp').description('Manage MCP (Model Context Protocol) servers');
 
