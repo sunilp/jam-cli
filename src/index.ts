@@ -152,24 +152,6 @@ program
     });
   });
 
-// ── explain ───────────────────────────────────────────────────────────────────
-program
-  .command('explain <path...>')
-  .description('Explain the contents of one or more files')
-  .option('--json', 'output response as JSON')
-  .action(async (paths: string[], cmdOpts: Record<string, unknown>) => {
-    const g = globalOpts();
-    const { runExplain } = await import('./commands/explain.js');
-    await runExplain(paths, {
-      profile: g.profile,
-      provider: g.provider,
-      model: g.model,
-      baseUrl: g.baseUrl,
-      noColor: g.color === false,
-      json: cmdOpts['json'] as boolean | undefined,
-    });
-  });
-
 // ── search ────────────────────────────────────────────────────────────────────
 program
   .command('search [query]')
@@ -190,92 +172,6 @@ program
       maxResults: cmdOpts['maxResults'] ? parseInt(String(cmdOpts['maxResults']), 10) : undefined,
       ask: cmdOpts['ask'] as boolean | undefined,
       json: cmdOpts['json'] as boolean | undefined,
-    });
-  });
-
-// ── diff ──────────────────────────────────────────────────────────────────────
-program
-  .command('diff')
-  .description('Review a git diff with AI')
-  .option('--staged', 'review staged changes')
-  .option('--path <path>', 'limit diff to a specific path')
-  .option('--no-review', 'just show the diff, no AI review')
-  .option('--json', 'output as JSON')
-  .action(async (cmdOpts: Record<string, unknown>) => {
-    const g = globalOpts();
-    const { runDiff } = await import('./commands/diff.js');
-    await runDiff({
-      profile: g.profile,
-      provider: g.provider,
-      model: g.model,
-      baseUrl: g.baseUrl,
-      staged: cmdOpts['staged'] as boolean | undefined,
-      path: cmdOpts['path'] as string | undefined,
-      noReview: cmdOpts['review'] === false,
-      json: cmdOpts['json'] as boolean | undefined,
-    });
-  });
-
-// ── review ────────────────────────────────────────────────────────────────────
-program
-  .command('review')
-  .description('Review a branch or PR with AI')
-  .option('--base <ref>', 'base branch or ref to diff against (default: main)')
-  .option('--pr <number>', 'review a specific PR number (requires GitHub CLI)')
-  .option('--json', 'output response as JSON')
-  .action(async (cmdOpts: Record<string, unknown>) => {
-    const g = globalOpts();
-    const { runReview } = await import('./commands/review.js');
-    await runReview({
-      profile: g.profile,
-      provider: g.provider,
-      model: g.model,
-      baseUrl: g.baseUrl,
-      base: cmdOpts['base'] as string | undefined,
-      pr: cmdOpts['pr'] !== undefined ? parseInt(String(cmdOpts['pr']), 10) : undefined,
-      json: cmdOpts['json'] as boolean | undefined,
-    });
-  });
-
-// ── commit ────────────────────────────────────────────────────────────────────
-program
-  .command('commit')
-  .description('Generate an AI commit message from staged changes and commit')
-  .option('--dry', 'generate the message but do not commit')
-  .option('--yes', 'auto-confirm without prompting')
-  .option('--amend', 'amend the last commit with a new AI-generated message')
-  .action(async (cmdOpts: Record<string, unknown>) => {
-    const g = globalOpts();
-    const { runCommit } = await import('./commands/commit.js');
-    await runCommit({
-      profile: g.profile,
-      provider: g.provider,
-      model: g.model,
-      baseUrl: g.baseUrl,
-      dry: cmdOpts['dry'] as boolean | undefined,
-      yes: cmdOpts['yes'] as boolean | undefined,
-      amend: cmdOpts['amend'] as boolean | undefined,
-    });
-  });
-
-// ── patch ─────────────────────────────────────────────────────────────────────
-program
-  .command('patch [instruction]')
-  .description('Generate and optionally apply a code patch')
-  .option('--file <path...>', 'include these files as context')
-  .option('--dry', 'generate the patch but do not offer to apply')
-  .option('--yes', 'auto-confirm patch application')
-  .action(async (instruction: string | undefined, cmdOpts: Record<string, unknown>) => {
-    const g = globalOpts();
-    const { runPatch } = await import('./commands/patch.js');
-    await runPatch(instruction, {
-      profile: g.profile,
-      provider: g.provider,
-      model: g.model,
-      baseUrl: g.baseUrl,
-      file: cmdOpts['file'] as string[] | undefined,
-      dry: cmdOpts['dry'] as boolean | undefined,
-      yes: cmdOpts['yes'] as boolean | undefined,
     });
   });
 
@@ -423,33 +319,6 @@ program
       lang: cmdOpts['lang'] as string | undefined,
       mermaid: cmdOpts['mermaid'] as boolean | undefined,
       dataLineage: cmdOpts['dataLineage'] as boolean | undefined,
-    });
-  });
-
-// ── verify ───────────────────────────────────────────────────────────────────
-program
-  .command('verify')
-  .description('Validate changes — run checks, scan for secrets, assess risk')
-  .option('--staged', 'verify only staged changes')
-  .option('--base <ref>', 'diff against a base branch (e.g. main)')
-  .option('--json', 'output structured JSON report')
-  .option('--fail-on-risk <level>', 'exit 1 if risk >= level (low|medium|high|critical)')
-  .option('--no-ai', 'skip AI risk assessment')
-  .action(async (cmdOpts: Record<string, unknown>) => {
-    const g = globalOpts();
-    const { runVerify } = await import('./commands/verify.js');
-    await runVerify({
-      profile: g.profile,
-      provider: g.provider,
-      model: g.model,
-      baseUrl: g.baseUrl,
-      noColor: g.color === false,
-      quiet: g.quiet,
-      staged: cmdOpts['staged'] as boolean | undefined,
-      base: cmdOpts['base'] as string | undefined,
-      json: cmdOpts['json'] as boolean | undefined,
-      failOnRisk: cmdOpts['failOnRisk'] as 'low' | 'medium' | 'high' | 'critical' | undefined,
-      noAi: cmdOpts['ai'] === false,
     });
   });
 
