@@ -144,7 +144,24 @@ export async function runDoctor(options: CliOverrides): Promise<void> {
 
   // Show a random tip when things are looking good
   if (failCount === 0) {
-    const { pickFortune } = await import('./vibes.js');
-    process.stdout.write(chalk.dim(`\n  ${pickFortune()}\n`));
+    const fortunes = [
+      '"A mass refactor is in your future. Resist."',
+      '"Your tests pass, but do they test the right thing?"',
+      '"The bug you\'re looking for is on line 42."',
+      '"Today\'s TODO is tomorrow\'s legacy code."',
+      '"A PR with no comments is either perfect or unreviewed."',
+      '"The node_modules folder weighs more than your laptop."',
+      '"git push --force is never the answer. Except when it is."',
+      '"Your linter knows things about you that your therapist doesn\'t."',
+      '"The best code is the code you never have to write."',
+      '"That env variable you forgot will surface at 3am."',
+      '"You will meet a mysterious segfault in your travels."',
+      '"The real tech debt was the friends we made along the way."',
+      '"Ship it. Then fix it. Then ship the fix. Then fix the fix."',
+      '"Your code is poetry. Unfortunately, it\'s a limerick."',
+      '"The best error message is the one you never see."',
+    ];
+    const fortune = fortunes[Math.floor(Math.random() * fortunes.length)]!;
+    process.stdout.write(chalk.dim(`\n  ${fortune}\n`));
   }
 }

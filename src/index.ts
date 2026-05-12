@@ -453,64 +453,6 @@ program
     });
   });
 
-// ── jira ─────────────────────────────────────────────────────────────────
-const jira = program.command('jira').description('Jira integration — browse and start working on issues');
-
-jira
-  .command('issues')
-  .description('List Jira issues assigned to you')
-  .option('--status <status...>', 'filter by status (e.g. "In Progress" "To Do")')
-  .option('--json', 'output as JSON')
-  .action(async (cmdOpts: Record<string, unknown>) => {
-    const g = globalOpts();
-    const { runJiraIssues } = await import('./commands/jira.js');
-    await runJiraIssues({
-      profile: g.profile,
-      provider: g.provider,
-      model: g.model,
-      baseUrl: g.baseUrl,
-      noColor: g.color === false,
-      quiet: g.quiet,
-      status: cmdOpts['status'] as string[] | undefined,
-      json: cmdOpts['json'] as boolean | undefined,
-    });
-  });
-
-jira
-  .command('start [key]')
-  .description('Fetch issue details, create a branch, and generate an implementation plan')
-  .option('--no-branch', 'skip branch creation')
-  .action(async (key: string | undefined, cmdOpts: Record<string, unknown>) => {
-    const g = globalOpts();
-    const { runJiraStart } = await import('./commands/jira.js');
-    await runJiraStart(key, {
-      profile: g.profile,
-      provider: g.provider,
-      model: g.model,
-      baseUrl: g.baseUrl,
-      noColor: g.color === false,
-      quiet: g.quiet,
-      noBranch: cmdOpts['branch'] === false,
-    });
-  });
-
-jira
-  .command('view [key]')
-  .description('View full details of a Jira issue')
-  .option('--json', 'output as JSON')
-  .action(async (key: string | undefined, cmdOpts: Record<string, unknown>) => {
-    const g = globalOpts();
-    const { runJiraView } = await import('./commands/jira.js');
-    await runJiraView(key, {
-      profile: g.profile,
-      provider: g.provider,
-      model: g.model,
-      baseUrl: g.baseUrl,
-      noColor: g.color === false,
-      json: cmdOpts['json'] as boolean | undefined,
-    });
-  });
-
 // ── mcp ──────────────────────────────────────────────────────────────────
 const mcp = program.command('mcp').description('Manage MCP (Model Context Protocol) servers');
 
@@ -795,24 +737,6 @@ program
     });
   });
 
-// ── md2pdf ───────────────────────────────────────────────────────────────────
-program
-  .command('md2pdf [file]')
-  .description('Convert a Markdown file to PDF')
-  .option('-o, --output <path>', 'output file path (default: <input>.pdf)')
-  .option('--title <title>', 'PDF document title')
-  .option('--style <name>', 'style preset: default, minimal, academic')
-  .option('--font-size <n>', 'body font size (default: 11)')
-  .action(async (file: string | undefined, cmdOpts: Record<string, unknown>) => {
-    const { runMd2Pdf } = await import('./commands/md2pdf.js');
-    await runMd2Pdf(file, {
-      output: cmdOpts['output'] as string | undefined,
-      title: cmdOpts['title'] as string | undefined,
-      style: cmdOpts['style'] as string | undefined,
-      fontSize: cmdOpts['fontSize'] ? parseInt(String(cmdOpts['fontSize']), 10) : undefined,
-    });
-  });
-
 // ── diagram ──────────────────────────────────────────────────────────────────
 program
   .command('diagram [scope]')
@@ -1075,14 +999,6 @@ browserCmd
       url: cmdOpts['url'] as string | undefined,
       output: cmdOpts['output'] as string | undefined,
     });
-  });
-
-// ── vibes (hidden easter egg) ────────────────────────────────────────────
-program
-  .command('vibes', { hidden: true })
-  .action(async () => {
-    const { runVibes } = await import('./commands/vibes.js');
-    await runVibes();
   });
 
 // ── Default action (no subcommand): print banner then help ──────────────────
