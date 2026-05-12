@@ -1,7 +1,7 @@
 {
   "name": "@sunilp-org/jam-cli",
-  "version": "0.11.4",
-  "description": "Developer-first AI CLI for cross-language code intelligence. Trace call graphs across Java, SQL, Python, TypeScript. Impact analysis, agentic execution, code review, git tools, 40+ commands. Works with Ollama, Copilot, OpenAI, Anthropic.",
+  "version": "0.12.0-rc.1",
+  "description": "Cross-language code intelligence CLI. Trace call graphs and column-level impact across Java, SQL, Python, TypeScript, Kotlin. Works as a standalone tool or as an MCP server for any AI agent.",
   "type": "module",
   "license": "MIT",
   "author": {
@@ -18,26 +18,27 @@
   },
   "homepage": "https://github.com/sunilp/jam-cli#readme",
   "keywords": [
-    "ai",
     "cli",
     "developer-tools",
     "code-intelligence",
     "call-graph",
     "impact-analysis",
+    "column-lineage",
     "cross-language",
+    "polyglot",
     "trace",
-    "agentic",
-    "code-review",
-    "ollama",
-    "copilot",
-    "openai",
-    "anthropic",
+    "mcp",
+    "mcp-server",
+    "jpa",
+    "spring-data",
+    "mybatis",
+    "sqlalchemy",
     "typescript",
     "python",
     "java",
     "sql",
-    "terminal",
-    "llm"
+    "kotlin",
+    "terminal"
   ],
   "engines": {
     "node": ">=20"
