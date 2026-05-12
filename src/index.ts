@@ -710,7 +710,7 @@ if (process.argv.slice(2).length === 0) {
 // ── Archived commands — print a clear migration pointer before commander's default
 const ARCHIVED_COMMANDS = new Set([
   'ask', 'chat', 'run', 'go', 'explain', 'review', 'verify',
-  'patch', 'commit', 'diff', 'jira', 'md2pdf',
+  'patch', 'commit', 'diff', 'jira', 'md2pdf', 'intel',
 ]);
 
 function maybePrintArchivePointer(): boolean {
