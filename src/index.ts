@@ -1092,6 +1092,30 @@ if (process.argv.slice(2).length === 0) {
   program.help();
 }
 
+// ── Archived commands — print a clear migration pointer before commander's default
+const ARCHIVED_COMMANDS = new Set([
+  'ask', 'chat', 'run', 'go', 'explain', 'review', 'verify',
+  'patch', 'commit', 'diff', 'jira', 'md2pdf', 'intel',
+]);
+
+function maybePrintArchivePointer(): boolean {
+  const argv = process.argv.slice(2);
+  const cmd = argv[0];
+  if (cmd && ARCHIVED_COMMANDS.has(cmd)) {
+    process.stderr.write(
+      `\n  jam: '${cmd}' was removed in v0.12.0.\n\n` +
+      `  This command lives on the archive/ai-suite branch and may return in a future release.\n` +
+      `  See: https://github.com/sunilp/jam-cli/tree/archive/ai-suite/src/commands/${cmd}.ts\n` +
+      `  Why removed: https://github.com/sunilp/jam-cli/blob/main/CHANGELOG.md#v0120\n\n`
+    );
+    return true;
+  }
+  return false;
+}
+
 // Load plugins then parse
 await loadPlugins();
+if (maybePrintArchivePointer()) {
+  process.exit(2);
+}
 program.parse();
