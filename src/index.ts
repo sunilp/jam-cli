@@ -48,52 +48,6 @@ program
     await runInit({ yes: cmdOpts['yes'] === true });
   });
 
-// ── ask ───────────────────────────────────────────────────────────────────────
-program
-  .command('ask [prompt]')
-  .description('Send a one-shot question to the AI')
-  .option('--file <path>', 'read prompt from file')
-  .option('--json', 'output response as JSON')
-  .option('--system <prompt>', 'override the system prompt')
-  .option('--no-tools', 'disable read-only tool use (file discovery off)')
-  .option('-v, --verbose', 'show detailed planning and search logs')
-  .action(async (prompt: string | undefined, cmdOpts: Record<string, unknown>) => {
-    const g = globalOpts();
-    const { runAsk } = await import('./commands/ask.js');
-    await runAsk(prompt, {
-      profile: g.profile,
-      provider: g.provider,
-      model: g.model,
-      baseUrl: g.baseUrl,
-      noColor: g.color === false,
-      quiet: g.quiet,
-      verbose: cmdOpts['verbose'] as boolean | undefined,
-      file: cmdOpts['file'] as string | undefined,
-      json: cmdOpts['json'] as boolean | undefined,
-      system: cmdOpts['system'] as string | undefined,
-      tools: cmdOpts['tools'] as boolean | undefined,
-    });
-  });
-
-// ── chat ──────────────────────────────────────────────────────────────────────
-program
-  .command('chat')
-  .description('Start an interactive multi-turn chat session')
-  .option('--resume <sessionId>', 'resume a previous session')
-  .option('--name <name>', 'name for the new session')
-  .action(async (cmdOpts: Record<string, unknown>) => {
-    const g = globalOpts();
-    const { runChat } = await import('./commands/chat.js');
-    await runChat({
-      profile: g.profile,
-      provider: g.provider,
-      model: g.model,
-      baseUrl: g.baseUrl,
-      resume: cmdOpts['resume'] as string | undefined,
-      name: cmdOpts['name'] as string | undefined,
-    });
-  });
-
 // ── go ───────────────────────────────────────────────────────────────────────
 program
   .command('go')
