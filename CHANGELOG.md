@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-05-11
+
+### Changed
+- **New positioning:** jam is now the cross-language code intelligence CLI for polyglot codebases. Lead use case: trace, impact, and diagram analysis across Java, SQL, Python, TypeScript, and Kotlin (Phase 3).
+- README rewritten around the new positioning. npm description and keywords updated.
+
+### Added
+- `jam impact <symbol>` — shortcut for `jam trace <symbol> --impact`.
+- Migration pointer: running an archived command (`jam ask`, `jam run`, etc.) prints a clear pointer to the [archive/ai-suite](https://github.com/sunilp/jam-cli/tree/archive/ai-suite) branch.
+- Regression guards: `trace-smoke.test.ts` and `keep-set-isolation.test.ts` prevent future re-coupling of the trace path to archive-bound modules.
+
+### Removed
+The following commands and their underlying modules were archived to the [`archive/ai-suite`](https://github.com/sunilp/jam-cli/tree/archive/ai-suite) branch. None of the code is lost — recover any file with `git checkout archive/ai-suite -- <path>`.
+
+- `jam ask`, `jam chat`, `jam run`, `jam go` — AI assistant features (use Claude Code, Cursor, or Aider instead).
+- `jam explain`, `jam review`, `jam verify`, `jam patch`, `jam commit`, `jam diff` — AI-augmented developer features.
+- `jam jira issues/start/view` — Jira integration.
+- `jam md2pdf` — Markdown-to-PDF.
+- `jam vibes` — hidden fortune-cookie easter egg.
+- `jam intel scan/status/query/impact/diagram/explore` — older code-intelligence subsystem, fully superseded by `jam trace` (Trace v2, tree-sitter + SQLite).
+
+### Internal
+- Archived `src/agent/`, `src/tools/`, `src/intel/`, `src/integrations/` directories.
+- Archived `src/utils/{agent,memory,critic,past-sessions,index-builder,cache}.ts`.
+- Removed `updateContextWithUsage` from `src/utils/context.ts` (its only caller was archived).
+- `src/personality/soul.ts` retained, parked for a future Phase 4+ AI revival.
+
+### Why
+After three months of building generic AI-assistant features, jam had 1 GitHub star and ~4 npm downloads/day. The space is owned by Claude Code, Cursor, Aider, and friends. Cross-language call graph tracing with column-level SQL impact analysis is the one thing none of them do — and that is now jam's only job.
+
 ## [0.3.0] - 2026-02-23
 
 ### Added
