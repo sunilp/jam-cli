@@ -316,6 +316,12 @@ export interface Requirement {
   command?: string;
   mustExit?: number;
   gitDiffCheck?: boolean;
+  /**
+   * Per-command cap, default 600_000. Without an override the only ceiling is
+   * 10 minutes per command with no cross-round caching, so three requirements
+   * over four retry rounds can run for an hour with nothing able to stop it.
+   */
+  timeoutMs?: number;
 }
 
 export interface ToolCall { id: string; name: string; arguments: Record<string, unknown> }
@@ -3900,17 +3906,27 @@ describe('Verifier', () => {
     // Both report exitCode -1. Treating a timeout as not-executable would make
     // the session report COMPLETED_UNVERIFIED instead of COMPLETED_PARTIAL.
     const slow = new Verifier(world, root, artifacts, [
-      { command: 'node -e "setTimeout(()=>{},60000)"', mustExit: 0 },
+      { command: 'node -e "setTimeout(()=>{},60000)"', mustExit: 0, timeoutMs: 500 },
     ], 3);
     const timedOut = await slow.evaluate(0);
     expect(timedOut.runnable).toBe(true);      // it ran; it just failed
     expect(timedOut.satisfied).toBe(false);
+    expect(timedOut.results[0]!.passed).toBe(false);
 
     const missing = new Verifier(world, root, artifacts, [
       { command: 'definitely-not-a-real-binary-xyz', mustExit: 0 },
     ], 3);
     expect((await missing.evaluate(0)).runnable).toBe(false);
-  }, 30_000);
+  }, 20_000);
+
+  it('honours a per-requirement timeout instead of the 10 minute default', async () => {
+    const started = Date.now();
+    const v = new Verifier(world, root, artifacts, [
+      { command: 'node -e "setTimeout(()=>{},60000)"', mustExit: 0, timeoutMs: 400 },
+    ], 3);
+    await v.evaluate(0);
+    expect(Date.now() - started).toBeLessThan(5_000);
+  }, 20_000);
 
   it('requires EVERY declared requirement to pass, not just one', async () => {
     const v = new Verifier(world, root, artifacts, [
@@ -3981,13 +3997,14 @@ export class Verifier {
 
     for (const req of this.requirements) {
       if (req.gitDiffCheck === true) {
-        results.push(await this.run('git diff --check', 'git', ['diff', '--check'], 0));
+        results.push(await this.run(
+          'git diff --check', 'git', ['diff', '--check'], 0, req.timeoutMs));
         continue;
       }
       if (req.command === undefined) continue;
 
       const [exe, args] = shellInvocation(req.command);
-      const r = await this.run(req.command, exe, args, req.mustExit ?? 0);
+      const r = await this.run(req.command, exe, args, req.mustExit ?? 0, req.timeoutMs);
       // spawnFailed, not exitCode -1: a killed process also reports -1, and
       // treating a timed-out check as "not executable" would report
       // COMPLETED_UNVERIFIED instead of COMPLETED_PARTIAL.
@@ -4005,10 +4022,10 @@ export class Verifier {
   }
 
   private async run(
-    label: string, exe: string, args: string[], mustExit: number
+    label: string, exe: string, args: string[], mustExit: number, timeoutMs = 600_000
   ): Promise<VerificationResult> {
     const r = await this.world.subprocess.run({
-      command: exe, args, cwd: this.root, timeoutMs: 600_000,
+      command: exe, args, cwd: this.root, timeoutMs,
     });
     const combined = r.stderr === '' ? r.stdout : `${r.stdout}\n--- stderr ---\n${r.stderr}`;
     const artifact = this.artifacts.put(combined);
