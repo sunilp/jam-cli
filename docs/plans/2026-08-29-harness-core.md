@@ -652,6 +652,20 @@ describe('preview', () => {
     expect(p).toContain('more characters elided');
   });
 
+  it('keeps the error block and tail even when every line is long', () => {
+    // A blind clamp of the joined string cuts from the end, eating the tail
+    // and the error block. Sectioned budgets must keep both.
+    const long = (s: string): string => s + ' '.repeat(400);
+    const lines = Array.from({ length: 300 }, (_, i) => long(`line ${i}`));
+    lines[150] = long('Error: the thing exploded');
+    const p = preview(lines.join('\n'), { head: 20, tail: 20 });
+
+    expect(p.length).toBeLessThan(20_000);
+    expect(p).toContain('Error: the thing exploded');   // error block survived
+    expect(p).toContain('line 299');                    // tail survived
+    expect(p).toContain('line 0');                      // head survived
+  });
+
   it('says so when it omits error lines beyond the cap', () => {
     // Silent truncation of a stack trace is the failure this guards against.
     const lines = Array.from({ length: 300 }, (_, i) => `line ${i}`);
@@ -743,21 +757,26 @@ export function preview(
   const errors = allErrors.slice(0, MAX_ERROR_LINES);
   const dropped = allErrors.length - errors.length;
 
+  // Budget each section separately. A blind clamp of the joined string cuts
+  // from the END, which silently eats the tail and even the error block when
+  // lines are long — exactly the "dropped without saying so" failure the error
+  // notice exists to prevent. Sectioned budgets keep the structure intact.
+  const budget = opts.maxChars ?? MAX_CHARS;
   const parts = [
-    ...headLines,
+    ...clampSection(headLines, Math.floor(budget * 0.4)),
     `… ${middle.length} lines elided …`,
     ...(errors.length
       ? [
           '--- error lines ---',
-          ...errors,
+          ...clampSection(errors, Math.floor(budget * 0.3)),
           // Never drop error lines without saying so: a model debugging a
           // failure it caused must know its stack trace was truncated.
           ...(dropped > 0 ? [`… ${dropped} more error lines omitted …`] : []),
         ]
       : []),
-    ...tailLines,
+    ...clampSection(tailLines, Math.floor(budget * 0.3)),
   ];
-  return clamp(parts.join('\n'), opts.maxChars ?? MAX_CHARS);
+  return clamp(parts.join('\n'), budget * 2);
 }
 
 /**
@@ -766,6 +785,21 @@ export function preview(
  * newlines — sails through the line-count check untouched and lands whole in
  * the journal and the model's context.
  */
+/** Keep as many whole lines as fit, and say how many were left out. */
+function clampSection(lines: string[], budget: number): string[] {
+  const out: string[] = [];
+  let used = 0;
+  for (const line of lines) {
+    if (used + line.length + 1 > budget) {
+      out.push(`… ${lines.length - out.length} more lines elided …`);
+      return out;
+    }
+    out.push(line);
+    used += line.length + 1;
+  }
+  return out;
+}
+
 function clamp(s: string, maxChars: number): string {
   if (s.length <= maxChars) return s;
   return `${s.slice(0, maxChars)}\n… ${s.length - maxChars} more characters elided …`;
