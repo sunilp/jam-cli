@@ -47,19 +47,26 @@ export class CheckpointStore {
     return info;
   }
 
+  /**
+   * Derives the ref path directly from `id` rather than looking it up in
+   * `meta`, which is an in-memory Map and cannot survive across processes.
+   * The checkpoint id is readable from the journal alone (see
+   * checkpoint.created events), so a fresh process resuming a session must be
+   * able to restore an id it never called create() for.
+   */
   async restore(id: string): Promise<RestoreResult> {
-    const info = this.meta.get(id);
-    if (!info) throw new Error(`Unknown checkpoint: ${id}`);
+    const ref = `refs/jam/checkpoints/${id}`;
+    if (!(await this.refExists(ref))) throw new Error(`Unknown checkpoint: ${id}`);
 
     // Everything tracked in the checkpoint, before we change anything.
     const inCheckpoint = new Set(
-      (await this.git(['ls-tree', '-r', '--name-only', info.ref]))
+      (await this.git(['ls-tree', '-r', '--name-only', ref]))
         .split('\n').filter((l) => l !== '')
     );
     const nowTracked = (await this.git(['ls-files']))
       .split('\n').filter((l) => l !== '');
 
-    await this.git(['checkout', info.ref, '--', '.']);
+    await this.git(['checkout', ref, '--', '.']);
 
     return {
       reverted: [...inCheckpoint],
@@ -67,7 +74,41 @@ export class CheckpointStore {
     };
   }
 
+  /** Unlike `git`, does not throw on a non-zero exit — a missing ref is the
+   *  expected way to learn an id is unknown, not a failure. */
+  private async refExists(ref: string): Promise<boolean> {
+    const r = await this.world.subprocess.run({
+      command: 'git', args: ['show-ref', '--verify', '--quiet', ref],
+      cwd: this.root, timeoutMs: 10_000,
+    });
+    return r.exitCode === 0;
+  }
+
   list(): Promise<CheckpointInfo[]> {
     return Promise.resolve([...this.meta.values()].sort((a, b) => b.at - a.at));
+  }
+
+  /**
+   * Deletes the refs this store created in this process. `create()` writes a
+   * permanent refs/jam/checkpoints/<uuid> on every mutating batch — a dozen
+   * refs from one run, immune to `git gc` — so a run that no longer needs
+   * rollback should clean up after itself. Only call this when nothing could
+   * still need restoring (see runAgent: COMPLETED_VERIFIED only).
+   * Returns the number of refs actually deleted.
+   */
+  async prune(): Promise<number> {
+    let pruned = 0;
+    for (const id of this.meta.keys()) {
+      try {
+        await this.git(['update-ref', '-d', `refs/jam/checkpoints/${id}`]);
+        pruned += 1;
+      } catch {
+        // Already gone (or never existed on disk, e.g. a clean-tree stash
+        // that still got a ref via the HEAD fallback in create()) — either
+        // way there is nothing left to delete.
+      }
+    }
+    this.meta.clear();
+    return pruned;
   }
 }

@@ -151,6 +151,13 @@ export async function runAgent(opts: AgentOptions): Promise<number> {
   };
   process.on('SIGINT', onSigint);
 
+  const checkpoints = new CheckpointStore(world, opts.cwd);
+  // Defaults to a non-VERIFIED value so an exception thrown before this is
+  // reassigned still leaves the finally block's prune guard closed — nothing
+  // is pruned unless the session is positively known to have reached
+  // COMPLETED_VERIFIED.
+  let state: TerminalState = 'CANCELLED';
+
   try {
     const stop = await runTurn({
       journal, artifacts, registry, world,
@@ -161,7 +168,7 @@ export async function runAgent(opts: AgentOptions): Promise<number> {
       provider: opts.provider,
       context: new NaiveContext(journal, registry),
       verifier: new Verifier(world, opts.cwd, artifacts, requirements, loaded.maxRetries),
-      checkpoints: new CheckpointStore(world, opts.cwd),
+      checkpoints,
       budget: {
         maxToolCalls: opts.maxToolCalls ?? 200,
         maxTokens: opts.maxTokens ?? 2_000_000,
@@ -176,23 +183,41 @@ export async function runAgent(opts: AgentOptions): Promise<number> {
     // place that gap is resolved into a reportable state; exitCodeFor still
     // treats every such stop as CANCELLED, see describeStop for what actually
     // distinguishes them for the human-readable report.
-    const state: TerminalState = terminal?.type === 'session.terminal'
-      ? terminal.state : 'CANCELLED';
+    state = terminal?.type === 'session.terminal' ? terminal.state : 'CANCELLED';
 
     // No terminal event means the session was STOPPED, not finished, and stays
     // resumable. The StopReason says which — falling back to CANCELLED for all
     // of them reports a blown budget as if the user had hit Ctrl-C.
     const stoppedBecause = terminal === undefined ? describeStop(stop) : undefined;
 
+    // Only a verified run has nothing left that could need rolling back — see
+    // the prune() call in `finally` below. Everywhere else the checkpoints
+    // must stay, so the report says how many were kept rather than silently
+    // leaving refs behind with no explanation.
+    const keptCheckpoints = state === 'COMPLETED_VERIFIED' ? 0 : (await checkpoints.list()).length;
+
     if (opts.json === true) {
       for (const e of events) {
         stdout.write(JSON.stringify({ ...e, logicalClock: e.logicalClock.toString() }) + '\n');
       }
     } else {
-      stdout.write(renderReport(events, state, sessionId, stoppedBecause));
+      stdout.write(renderReport(events, state, sessionId, stoppedBecause, keptCheckpoints));
     }
     return exitCodeFor(state);
   } finally {
+    // Checkpoints are permanent git refs (refs/jam/checkpoints/<id>) immune to
+    // `git gc`. Only a COMPLETED_VERIFIED session has nothing left that could
+    // need rolling back, so pruning is scoped to exactly that case — anything
+    // else (partial, unverified, failed, cancelled, budget-stopped) leaves
+    // them in place on purpose.
+    if (state === 'COMPLETED_VERIFIED') {
+      try {
+        await checkpoints.prune();
+      } catch {
+        // Best-effort housekeeping; a failure here must not mask the run's
+        // actual outcome, which has already been reported above.
+      }
+    }
     process.removeListener('SIGINT', onSigint);
     journal.close();
     artifacts.close();
@@ -201,7 +226,7 @@ export async function runAgent(opts: AgentOptions): Promise<number> {
 
 function renderReport(
   events: ReturnType<Journal['replay']>, state: TerminalState,
-  sessionId: string, stoppedBecause?: string
+  sessionId: string, stoppedBecause?: string, keptCheckpoints = 0
 ): string {
   const changed = new Set<string>();
   const lines: string[] = [];
@@ -233,6 +258,14 @@ function renderReport(
   // is what actually matters to someone who wants to pick this back up.
   if (stoppedBecause !== undefined) {
     out.push(`  Session ${sessionId} kept; nothing was finalised.`, '');
+  }
+  // Checkpoints are only pruned after a COMPLETED_VERIFIED run (see
+  // runAgent's finally), so this only ever fires for an outcome that left
+  // them in place on purpose — a silent permanent git ref is worse than one
+  // that at least says it is there.
+  if (keptCheckpoints > 0) {
+    out.push(`  ${keptCheckpoints} checkpoint${keptCheckpoints === 1 ? '' : 's'} kept ` +
+              `under refs/jam/checkpoints/ (run was not verified, so nothing was pruned).`, '');
   }
   return out.join('\n');
 }

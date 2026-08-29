@@ -359,6 +359,93 @@ describe('runAgent', () => {
       .toBe(checkpointId);
   });
 
+  it('reports how many checkpoints were kept when the run did not verify, ' +
+     'instead of silently leaving permanent git refs behind', async () => {
+    const world = new LocalExecutionWorld();
+    const git = async (args: string[]): Promise<{ stdout: string; exitCode: number }> => {
+      const r = await world.subprocess.run({ command: 'git', args, cwd, timeoutMs: 15_000 });
+      if (r.exitCode !== 0) throw new Error(`git ${args.join(' ')} failed: ${r.stderr}`);
+      return r;
+    };
+
+    await git(['init', '-q']);
+    await git(['config', 'user.email', 't@example.com']);
+    await git(['config', 'user.name', 'T']);
+    await writeFile(join(cwd, 'a.txt'), 'original\n');
+    await git(['add', '.']);
+    await git(['commit', '-qm', 'init']);
+    await writeFile(join(cwd, 'a.txt'), 'modified\n');
+    const diff = await git(['diff']);
+    await git(['checkout', '--', 'a.txt']);
+
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const code = await runAgent({
+      task: 'do the thing',
+      cwd,
+      provider: new MockProvider([
+        { content: null, toolCalls: [
+          { id: '1', name: 'apply_patch', arguments: { patch: diff.stdout } },
+        ] },
+        { content: 'done', toolCalls: [] },
+      ]),
+      dbPath: ':memory:',
+    });
+
+    expect(code).toBe(3); // COMPLETED_UNVERIFIED: nothing declared to verify
+    const written = stdout.mock.calls.map((c) => String(c[0])).join('');
+    expect(written).toMatch(/1 checkpoint kept under refs\/jam\/checkpoints\//);
+  });
+
+  it('prunes checkpoint refs after a COMPLETED_VERIFIED run, since nothing ' +
+     'is left that could need rolling back', async () => {
+    const world = new LocalExecutionWorld();
+    const git = async (args: string[]): Promise<{ stdout: string; exitCode: number }> => {
+      const r = await world.subprocess.run({ command: 'git', args, cwd, timeoutMs: 15_000 });
+      if (r.exitCode !== 0) throw new Error(`git ${args.join(' ')} failed: ${r.stderr}`);
+      return r;
+    };
+
+    await git(['init', '-q']);
+    await git(['config', 'user.email', 't@example.com']);
+    await git(['config', 'user.name', 'T']);
+    await writeFile(join(cwd, 'a.txt'), 'original\n');
+    await git(['add', '.']);
+    await git(['commit', '-qm', 'init']);
+    await writeFile(join(cwd, 'a.txt'), 'modified\n');
+    const diff = await git(['diff']);
+    await git(['checkout', '--', 'a.txt']);
+
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const code = await runAgent({
+      task: 'do the thing',
+      cwd,
+      provider: new MockProvider([
+        { content: null, toolCalls: [
+          { id: '1', name: 'apply_patch', arguments: { patch: diff.stdout } },
+        ] },
+        { content: 'done', toolCalls: [] },
+      ]),
+      extraVerify: ['true'],
+      json: true,
+      dbPath: ':memory:',
+    });
+
+    expect(code).toBe(0); // COMPLETED_VERIFIED
+    const lines = stdout.mock.calls.map((c) => String(c[0]).trim()).filter((l) => l !== '');
+    const events = lines.map((l) => JSON.parse(l) as { event: Record<string, unknown> });
+    const checkpointEvent = events.find((e) => e.event['type'] === 'checkpoint.created');
+    const ref = (checkpointEvent?.event as { ref?: string } | undefined)?.ref;
+    expect(ref).toBeTruthy();
+
+    // The ref itself must be gone from git, not merely forgotten by an
+    // in-memory store that is about to be discarded anyway.
+    const check = await world.subprocess.run({
+      command: 'git', args: ['show-ref', '--verify', '--quiet', ref as string],
+      cwd, timeoutMs: 10_000,
+    });
+    expect(check.exitCode).not.toBe(0);
+  });
+
   it('fails fast with a clear message when .jam/config.yaml is malformed, ' +
      'without opening a session', async () => {
     await mkdir(join(cwd, '.jam'), { recursive: true });
