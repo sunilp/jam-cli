@@ -1621,6 +1621,40 @@ describe('DefaultPolicy', () => {
     });
     expect(d.type).toBe('deny');
   });
+
+  it('denies shell access to .jam/, which is otherwise a way around the guard', () => {
+    // A values-only scan never sees this: run_command's args is an array.
+    // Without both fixes the model reaches only approval_required and can
+    // talk its way past the one categorical rule in the design.
+    for (const args of [
+      ['-c', 'echo "verification: {}" > .jam/config.yaml'],
+      ['-c', 'rm ./.jam/config.yaml'],
+      ['-c', 'cat a/../.jam/config.yaml > /dev/null'],
+      ['/w/.jam/config.yaml'],
+      ['.jam\\config.yaml'],
+      ['-rf', '.jam'],
+    ]) {
+      const d = p.evaluate({
+        ...base, tool: 'run_command', risk: 'R2', input: { command: 'sh', args },
+      });
+      expect(d, `args ${JSON.stringify(args)}`).toMatchObject({ type: 'deny' });
+    }
+  });
+
+  it('does not deny paths that merely start with the same letters', () => {
+    const d = p.evaluate({
+      ...base, tool: 'run_command', risk: 'R1',
+      input: { command: 'cat', args: ['.jamfile', 'src/myjam/x.ts'] },
+    });
+    expect(d.type).not.toBe('deny');
+  });
+
+  it('still allows reading .jam through the non-mutating read_file tool', () => {
+    const d = p.evaluate({
+      ...base, tool: 'read_file', risk: 'R0', input: { path: '.jam/config.yaml' },
+    });
+    expect(d.type).toBe('allow');
+  });
 });
 ```
 
@@ -1677,14 +1711,32 @@ export function combine(a: PolicyDecision, b: PolicyDecision): PolicyDecision {
   return RANK[a.type] >= RANK[b.type] ? a : b;
 }
 
-const MUTATING_TOOLS = new Set(['apply_patch', 'write_file']);
-const PROTECTED_PATH = /(^|[\s"'/])\.jam\//;
+// run_command belongs here: a shell can mutate .jam/ just as effectively as a
+// patch, and leaving it out downgrades the one categorical rule in the design
+// to an approval prompt the model can talk its way past.
+const MUTATION_CAPABLE = new Set(['apply_patch', 'write_file', 'run_command']);
+
+/** `.jam` as a path segment, separator-normalised. Matches .jam/, ./.jam/,
+ *  a/../.jam/, /abs/.jam/x, .jam\config.yaml and bare `.jam`; not `.jamfile`. */
+const PROTECTED_SEGMENT = /(^|[^A-Za-z0-9_.-])\.jam($|\/|[^A-Za-z0-9_.-])/;
+
+/** Every string anywhere in the input, including inside arrays. run_command's
+ *  args is an array, so a values-only scan never sees the payload at all. */
+function stringsIn(value: unknown, depth = 0): string[] {
+  if (depth > 6) return [];
+  if (typeof value === 'string') return [value];
+  if (Array.isArray(value)) return value.flatMap((v) => stringsIn(v, depth + 1));
+  if (typeof value === 'object' && value !== null) {
+    return Object.values(value).flatMap((v) => stringsIn(v, depth + 1));
+  }
+  return [];
+}
 
 export class DefaultPolicy implements PolicyEngine {
   evaluate(input: PolicyInput): PolicyDecision {
     // Requirements and the config that declares them are off limits to the
     // model. See spec 9.3 — without this, completion can be faked.
-    if (MUTATING_TOOLS.has(input.tool) && this.touchesProtectedPath(input.input)) {
+    if (MUTATION_CAPABLE.has(input.tool) && this.touchesProtectedPath(input.input)) {
       return { type: 'deny', reason: 'mutation of .jam/ is not permitted' };
     }
 
@@ -1702,9 +1754,9 @@ export class DefaultPolicy implements PolicyEngine {
   }
 
   private touchesProtectedPath(input: unknown): boolean {
-    if (typeof input !== 'object' || input === null) return false;
-    const values = Object.values(input as Record<string, unknown>);
-    return values.some((v) => typeof v === 'string' && PROTECTED_PATH.test(v));
+    return stringsIn(input).some((s) =>
+      PROTECTED_SEGMENT.test(s.replace(/\\/g, '/'))
+    );
   }
 }
 ```
