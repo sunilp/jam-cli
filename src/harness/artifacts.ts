@@ -69,20 +69,48 @@ export function preview(
   const errors = allErrors.slice(0, MAX_ERROR_LINES);
   const dropped = allErrors.length - errors.length;
 
+  // Budget each section separately. A blind clamp of the joined string cuts
+  // from the END, which silently eats the tail and even the error block when
+  // lines are long — exactly the "dropped without saying so" failure the error
+  // notice exists to prevent. Sectioned budgets keep the structure intact.
+  const budget = opts.maxChars ?? MAX_CHARS;
   const parts = [
-    ...headLines,
+    ...clampSection(headLines, Math.floor(budget * 0.4)),
     `… ${middle.length} lines elided …`,
     ...(errors.length
       ? [
           '--- error lines ---',
-          ...errors,
-          // Never drop error lines without saying so.
+          ...clampSection(errors, Math.floor(budget * 0.3)),
+          // Never drop error lines without saying so: a model debugging a
+          // failure it caused must know its stack trace was truncated.
           ...(dropped > 0 ? [`… ${dropped} more error lines omitted …`] : []),
         ]
       : []),
-    ...tailLines,
+    // clampSection keeps whatever fits from the FRONT of what it's given and
+    // elides the rest — correct for head (keep the earliest lines) and for
+    // errors (already front-truncated to MAX_ERROR_LINES above), but backwards
+    // for tail: without reversing, it would keep tailLines' earliest entries
+    // and silently drop the actual last lines of the output — the exact
+    // "cuts from the end" failure this whole budgeting scheme exists to avoid,
+    // just relocated one level down. Reverse in, clamp, reverse back.
+    ...clampSection([...tailLines].reverse(), Math.floor(budget * 0.3)).reverse(),
   ];
-  return clamp(parts.join('\n'), opts.maxChars ?? MAX_CHARS);
+  return clamp(parts.join('\n'), budget * 2);
+}
+
+/** Keep as many whole lines as fit, and say how many were left out. */
+function clampSection(lines: string[], budget: number): string[] {
+  const out: string[] = [];
+  let used = 0;
+  for (const line of lines) {
+    if (used + line.length + 1 > budget) {
+      out.push(`… ${lines.length - out.length} more lines elided …`);
+      return out;
+    }
+    out.push(line);
+    used += line.length + 1;
+  }
+  return out;
 }
 
 /**

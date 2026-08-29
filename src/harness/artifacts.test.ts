@@ -60,6 +60,18 @@ describe('preview', () => {
     expect(p).toContain('more characters elided');
   });
 
+  it('keeps the error block and tail even when every line is long', () => {
+    const long = (s: string): string => s + ' '.repeat(400);
+    const lines = Array.from({ length: 300 }, (_, i) => long(`line ${i}`));
+    lines[150] = long('Error: the thing exploded');
+    const p = preview(lines.join('\n'), { head: 20, tail: 20 });
+
+    expect(p.length).toBeLessThan(20_000);
+    expect(p).toContain('Error: the thing exploded');
+    expect(p).toContain('line 299');
+    expect(p).toContain('line 0');
+  });
+
   it('says so when it omits error lines beyond the cap', () => {
     const lines = Array.from({ length: 300 }, (_, i) => `line ${i}`);
     for (let i = 100; i < 130; i++) lines[i] = `Error: boom ${i}`;
