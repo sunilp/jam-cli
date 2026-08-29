@@ -3037,6 +3037,7 @@ import { ArtifactStore } from './artifacts.js';
 import { LocalExecutionWorld } from './world/local.js';
 import { NullTelemetry } from './telemetry.js';
 import type { Tool } from './tools/types.js';
+import type { RuntimeEvent } from './events.js';
 
 let deps: DispatchDeps;
 let journal: Journal;
@@ -3155,6 +3156,49 @@ describe('dispatch', () => {
     // The workspace changed; losing that event would be an unlogged mutation.
     expect(types).toContain('file.modified');
     expect(types).toContain('tool.completed');
+  });
+
+  it('records that a human was asked and consented', async () => {
+    // The audit trail must be able to show human sign-off. Overwriting the
+    // approval_required decision with a bare 'allow' before journaling erases
+    // the only evidence a person was ever involved.
+    await dispatch(deps, sessionId, { id: '1', name: 'risky', arguments: {} },
+      new AbortController().signal);
+
+    const decided = journal.replay(sessionId)
+      .map((e) => e.event)
+      .filter((e): e is Extract<RuntimeEvent, { type: 'tool.decided' }> =>
+        e.type === 'tool.decided');
+    expect(decided.map((d) => d.decision.type)).toEqual(['approval_required']);
+    expect(executed).toEqual(['risky']);
+  });
+
+  it('records the decline as a separate decision, and does not execute', async () => {
+    // available() true but request() false — a human who was asked and said no.
+    // Distinct from AutoDenyApprovalHost, which fails closed before asking.
+    const declining = {
+      available: (): boolean => true,
+      request: (): Promise<boolean> => Promise.resolve(false),
+    };
+    const d = makeDeps(declining);
+    await dispatch(d, sessionId, { id: '1', name: 'risky', arguments: {} },
+      new AbortController().signal);
+
+    const decided = journal.replay(sessionId)
+      .map((e) => e.event)
+      .filter((e): e is Extract<RuntimeEvent, { type: 'tool.decided' }> =>
+        e.type === 'tool.decided');
+    expect(decided.map((x) => x.decision.type)).toEqual(['approval_required', 'deny']);
+    expect(executed).toEqual([]);
+  });
+
+  it('journals exactly one decision when no approval was needed', async () => {
+    await dispatch(deps, sessionId, { id: '1', name: 'ok', arguments: { a: 'hi' } },
+      new AbortController().signal);
+    const decided = journal.replay(sessionId)
+      .map((e) => e.event)
+      .filter((e) => e.type === 'tool.decided');
+    expect(decided).toHaveLength(1);
   });
 
   it('reports an unknown tool as not_found', async () => {
