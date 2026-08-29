@@ -31,4 +31,11 @@ describe('safePath', () => {
     const root = await mkdtemp(join(tmpdir(), 'jam-safe-'));
     await expect(safePath(world, root, 'new.txt')).resolves.toBe(join(root, 'new.txt'));
   });
+
+  it('rejects a symlink loop inside the workspace', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jam-safe-'));
+    await symlink(join(root, 'b'), join(root, 'a'));
+    await symlink(join(root, 'a'), join(root, 'b'));
+    await expect(safePath(world, root, 'a')).rejects.toThrow(/could not be resolved/);
+  });
 });

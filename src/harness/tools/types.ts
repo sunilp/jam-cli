@@ -74,8 +74,16 @@ export async function safePath(
       throw new Error(`Path "${relativePath}" resolves outside the workspace. Access denied.`);
     }
   } catch (err) {
-    // A path that does not exist yet is fine; anything else is a real refusal.
     if (err instanceof Error && err.message.includes('outside the workspace')) throw err;
+    // A path that does not exist yet is fine — tools create files. Anything
+    // else (ELOOP, EACCES, invalid argument) is a refusal, not a pass: a
+    // boundary guard that fails open is not a boundary guard.
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT') {
+      throw new Error(
+        `Path "${relativePath}" could not be resolved (${code ?? 'unknown'}). Access denied.`
+      );
+    }
   }
 
   return resolved;

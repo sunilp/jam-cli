@@ -7,6 +7,28 @@ export interface ProviderToolDefinition {
   parameters: { type: 'object'; properties: Record<string, unknown>; required?: string[] };
 }
 
+/**
+ * The JSON type for one field. Throws on a shape it does not model, rather
+ * than defaulting to 'string': a silent mistype is exactly the schema/validator
+ * drift that generating from zod exists to prevent. Extend this rather than
+ * letting a tool ship a provider schema its validator will reject.
+ */
+function jsonTypeOf(field: z.ZodTypeAny): Record<string, unknown> {
+  if (field instanceof z.ZodString) return { type: 'string' };
+  if (field instanceof z.ZodNumber) return { type: 'number' };
+  if (field instanceof z.ZodBoolean) return { type: 'boolean' };
+  if (field instanceof z.ZodEnum) {
+    return { type: 'string', enum: (field as z.ZodEnum<[string, ...string[]]>).options };
+  }
+  if (field instanceof z.ZodArray) {
+    return { type: 'array', items: jsonTypeOf((field as z.ZodArray<z.ZodTypeAny>).element) };
+  }
+  throw new Error(
+    `toJsonSchema does not model ${field.constructor.name}. Add a branch for it ` +
+    `instead of letting the provider schema drift from the zod validator.`
+  );
+}
+
 /** Minimal zod -> JSON Schema for the object shapes our tools use. */
 function toJsonSchema(schema: z.ZodTypeAny): ProviderToolDefinition['parameters'] {
   const shape = (schema as z.ZodObject<z.ZodRawShape>).shape ?? {};
@@ -21,12 +43,9 @@ function toJsonSchema(schema: z.ZodTypeAny): ProviderToolDefinition['parameters'
       field = field._def.innerType as z.ZodTypeAny;
     }
     const description = field.description;
-    let type = 'string';
-    if (field instanceof z.ZodNumber) type = 'number';
-    else if (field instanceof z.ZodBoolean) type = 'boolean';
-    else if (field instanceof z.ZodArray) type = 'array';
+    const shapeOf = jsonTypeOf(field);
 
-    properties[key] = description === undefined ? { type } : { type, description };
+    properties[key] = description === undefined ? shapeOf : { ...shapeOf, description };
     if (!optional) required.push(key);
   }
 
