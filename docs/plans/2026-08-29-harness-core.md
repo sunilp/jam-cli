@@ -1297,6 +1297,54 @@ describe('ToolRegistry', () => {
       parameters: { type: 'object', properties: { a: { type: 'string' } }, required: ['a'] },
     });
   });
+
+  it('derives each field type from zod rather than guessing', () => {
+    // One tool shape cannot catch a hardcoded toJsonSchema. Several can.
+    const shapes: Tool<Record<string, unknown>, null> = {
+      name: 'shapes',
+      description: 'many field kinds',
+      input: z.object({
+        s: z.string().describe('a string'),
+        n: z.number(),
+        b: z.boolean(),
+        arr: z.array(z.string()),
+        e: z.enum(['x', 'y']),
+        opt: z.string().optional(),
+      }),
+      risk: 'R0',
+      mutates: false,
+      execute: () => Promise.resolve({ ok: true, value: null }),
+    };
+    const r = new ToolRegistry();
+    r.register(shapes);
+    const [def] = r.definitions();
+
+    expect(def!.parameters.properties).toMatchObject({
+      s: { type: 'string', description: 'a string' },
+      n: { type: 'number' },
+      b: { type: 'boolean' },
+      arr: { type: 'array', items: { type: 'string' } },
+      e: { type: 'string', enum: ['x', 'y'] },
+      opt: { type: 'string' },
+    });
+    expect(def!.parameters.required).toEqual(['s', 'n', 'b', 'arr', 'e']);
+  });
+
+  it('refuses to emit a schema for a zod shape it does not model', () => {
+    const nested: Tool<Record<string, unknown>, null> = {
+      name: 'nested',
+      description: 'unsupported shape',
+      input: z.object({ o: z.object({ x: z.string() }) }),
+      risk: 'R0',
+      mutates: false,
+      execute: () => Promise.resolve({ ok: true, value: null }),
+    };
+    const r = new ToolRegistry();
+    r.register(nested);
+    // Silently emitting {type:'string'} here would tell the provider to send a
+    // string for a field the validator requires to be an object.
+    expect(() => r.definitions()).toThrow(/does not model/);
+  });
 });
 ```
 
@@ -1385,8 +1433,16 @@ export async function safePath(
       throw new Error(`Path "${relativePath}" resolves outside the workspace. Access denied.`);
     }
   } catch (err) {
-    // A path that does not exist yet is fine; anything else is a real refusal.
     if (err instanceof Error && err.message.includes('outside the workspace')) throw err;
+    // A path that does not exist yet is fine — tools create files. Anything
+    // else (ELOOP, EACCES, invalid argument) is a refusal, not a pass: a
+    // boundary guard that fails open is not a boundary guard.
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT') {
+      throw new Error(
+        `Path "${relativePath}" could not be resolved (${code ?? 'unknown'}). Access denied.`
+      );
+    }
   }
 
   return resolved;
@@ -1406,6 +1462,28 @@ export interface ProviderToolDefinition {
   parameters: { type: 'object'; properties: Record<string, unknown>; required?: string[] };
 }
 
+/**
+ * The JSON type for one field. Throws on a shape it does not model, rather
+ * than defaulting to 'string': a silent mistype is exactly the schema/validator
+ * drift that generating from zod exists to prevent. Extend this rather than
+ * letting a tool ship a provider schema its validator will reject.
+ */
+function jsonTypeOf(field: z.ZodTypeAny): Record<string, unknown> {
+  if (field instanceof z.ZodString) return { type: 'string' };
+  if (field instanceof z.ZodNumber) return { type: 'number' };
+  if (field instanceof z.ZodBoolean) return { type: 'boolean' };
+  if (field instanceof z.ZodEnum) {
+    return { type: 'string', enum: (field as z.ZodEnum<[string, ...string[]]>).options };
+  }
+  if (field instanceof z.ZodArray) {
+    return { type: 'array', items: jsonTypeOf((field as z.ZodArray<z.ZodTypeAny>).element) };
+  }
+  throw new Error(
+    `toJsonSchema does not model ${field.constructor.name}. Add a branch for it ` +
+    `instead of letting the provider schema drift from the zod validator.`
+  );
+}
+
 /** Minimal zod -> JSON Schema for the object shapes our tools use. */
 function toJsonSchema(schema: z.ZodTypeAny): ProviderToolDefinition['parameters'] {
   const shape = (schema as z.ZodObject<z.ZodRawShape>).shape ?? {};
@@ -1420,12 +1498,9 @@ function toJsonSchema(schema: z.ZodTypeAny): ProviderToolDefinition['parameters'
       field = field._def.innerType as z.ZodTypeAny;
     }
     const description = field.description;
-    let type = 'string';
-    if (field instanceof z.ZodNumber) type = 'number';
-    else if (field instanceof z.ZodBoolean) type = 'boolean';
-    else if (field instanceof z.ZodArray) type = 'array';
+    const shape = jsonTypeOf(field);
 
-    properties[key] = description === undefined ? { type } : { type, description };
+    properties[key] = description === undefined ? shape : { ...shape, description };
     if (!optional) required.push(key);
   }
 
