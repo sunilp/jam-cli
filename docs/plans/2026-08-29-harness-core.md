@@ -3875,6 +3875,23 @@ describe('Verifier', () => {
     expect(verdict.exhausted).toBe(false);
   });
 
+  it('never reports satisfied when verification was cut short', async () => {
+    // Aborting between two requirements leaves a partial results array whose
+    // entries all passed. Without a completeness check that reads as satisfied,
+    // which would reach COMPLETED_VERIFIED by cancelling at the right moment.
+    const v = new Verifier(world, root, artifacts, [
+      { command: 'node -e "process.exit(0)"', mustExit: 0 },
+      { command: 'node -e "process.exit(0)"', mustExit: 0 },
+    ], 3);
+    const ac = new AbortController();
+    ac.abort();
+    const verdict = await v.evaluate(0, ac.signal);
+
+    expect(verdict.results.length).toBeLessThan(2);
+    expect(verdict.satisfied).toBe(false);
+    expect(verdict.runnable).toBe(false);
+  });
+
   it('is exhausted once the retry budget is spent', async () => {
     const v = new Verifier(world, root, artifacts, [
       { command: 'node -e "process.exit(1)"', mustExit: 0 },
@@ -4013,9 +4030,14 @@ export class Verifier {
       results.push(r);
     }
 
-    const satisfied = executable && results.length > 0 && results.every((r) => r.passed);
+    // Every declared requirement must have RUN. Cancelling between two
+    // requirements otherwise leaves a partial results array whose entries all
+    // passed, and satisfied would be true — reaching COMPLETED_VERIFIED by
+    // aborting at the right moment, with requirements never checked.
+    const complete = results.length === this.requirements.length;
+    const satisfied = executable && complete && results.length > 0 && results.every((r) => r.passed);
     return {
-      runnable: executable && results.length > 0,
+      runnable: executable && complete && results.length > 0,
       satisfied,
       exhausted: round >= this.maxRetries,
       results,
@@ -4453,6 +4475,9 @@ async function turn(
     if (res.toolCalls.length === 0) {
       // The model wants to stop. It does not get to decide that.
       const verdict = await deps.verifier.evaluate(round, signal);
+      // A cancelled session gets no terminal state at all. Belt to the
+      // verifier's braces: never record an outcome for work that was stopped.
+      if (signal.aborted) return 'cancelled';
       deps.journal.append(sessionId, {
         type: 'verification.completed', results: verdict.results,
       });
