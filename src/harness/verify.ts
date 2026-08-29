@@ -26,7 +26,7 @@ export class Verifier {
     private readonly maxRetries: number
   ) {}
 
-  async evaluate(round: number): Promise<Verdict> {
+  async evaluate(round: number, signal?: AbortSignal): Promise<Verdict> {
     if (this.requirements.length === 0) {
       return { runnable: false, satisfied: false, exhausted: true, results: [] };
     }
@@ -35,9 +35,12 @@ export class Verifier {
     let executable = true;
 
     for (const req of this.requirements) {
+      // Threaded so Ctrl-C kills a long check rather than outrunning it.
+      if (signal?.aborted === true) break;
+
       if (req.gitDiffCheck === true) {
         const { result } = await this.run(
-          'git diff --check', 'git', ['diff', '--check'], 0, req.timeoutMs
+          'git diff --check', 'git', ['diff', '--check'], 0, req.timeoutMs, signal
         );
         results.push(result);
         continue;
@@ -46,7 +49,7 @@ export class Verifier {
 
       const [exe, args] = shellInvocation(req.command);
       const { result, spawnFailed } = await this.run(
-        req.command, exe, args, req.mustExit ?? 0, req.timeoutMs
+        req.command, exe, args, req.mustExit ?? 0, req.timeoutMs, signal
       );
       // spawnFailed, not exitCode -1: a killed process also reports -1, and
       // treating a timed-out check as "not executable" would report
@@ -65,10 +68,13 @@ export class Verifier {
   }
 
   private async run(
-    label: string, exe: string, args: string[], mustExit: number, timeoutMs = 600_000
+    label: string, exe: string, args: string[], mustExit: number,
+    timeoutMs = 600_000, signal?: AbortSignal
   ): Promise<{ result: VerificationResult; spawnFailed: boolean }> {
+    // Threaded so Ctrl-C kills a long check. Without it the wall-clock deadline
+    // is only a between-rounds gate and one slow requirement outruns it.
     const r = await this.world.subprocess.run({
-      command: exe, args, cwd: this.root, timeoutMs,
+      command: exe, args, cwd: this.root, timeoutMs, signal,
     });
     const combined = r.stderr === '' ? r.stdout : `${r.stdout}\n--- stderr ---\n${r.stderr}`;
     const artifact = this.artifacts.put(combined);

@@ -99,6 +99,32 @@ describe('runTurn', () => {
     });
   });
 
+  it('returns cancelled when the signal fires while the model is responding', async () => {
+    const d = await deps([{ content: 'done', toolCalls: [] }], PASSING);
+    const ac = new AbortController();
+    d.provider = {
+      name: 'aborting', model: 'stub',
+      capabilities: () => Promise.resolve({ toolCalling: true, streaming: false, contextWindow: 1000 }),
+      countTokens: () => Promise.resolve(1),
+      generate: () => { ac.abort(); return Promise.resolve({ content: 'done', toolCalls: [] }); },
+    };
+    const s = d.journal.createSession({ task: 't', cwd: root, requirements: PASSING });
+
+    expect(await runTurn(d, s, 't', ac.signal)).toBe('cancelled');
+    expect(d.journal.replay(s).map((e) => e.event.type)).not.toContain('session.terminal');
+  });
+
+  it('records FAILED rather than rejecting when a dependency throws', async () => {
+    const d = await deps([{ content: 'done', toolCalls: [] }], PASSING);
+    d.context = { build: () => { throw new Error('context exploded'); } };
+    const s = d.journal.createSession({ task: 't', cwd: root, requirements: PASSING });
+
+    expect(await runTurn(d, s, 't', new AbortController().signal)).toBe('end_turn');
+    expect(d.journal.replay(s).at(-1)!.event).toMatchObject({
+      type: 'session.terminal', state: 'FAILED',
+    });
+  });
+
   it('returns cancelled on abort and leaves the session resumable', async () => {
     const d = await deps([{ content: 'done', toolCalls: [] }], PASSING);
     const s = d.journal.createSession({ task: 't', cwd: root, requirements: PASSING });

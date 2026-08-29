@@ -29,6 +29,32 @@ export async function runTurn(
   prompt: string,
   signal: AbortSignal
 ): Promise<StopReason> {
+  try {
+    return await turn(deps, sessionId, prompt, signal);
+  } catch (err) {
+    // Nothing may escape as a rejected promise. Only provider.generate() was
+    // guarded before, so a throw from context.build, verifier.evaluate,
+    // journal.append or dispatch left the caller with neither a terminal event
+    // nor a StopReason — an unhandled rejection instead of a recorded outcome.
+    if (signal.aborted) return 'cancelled';
+    deps.journal.append(sessionId, {
+      type: 'model.failed',
+      error: {
+        type: 'internal', recoverable: false,
+        message: err instanceof Error ? err.message : String(err),
+      },
+    });
+    finish(deps, sessionId, 'FAILED');
+    return 'end_turn';
+  }
+}
+
+async function turn(
+  deps: LoopDeps,
+  sessionId: string,
+  prompt: string,
+  signal: AbortSignal
+): Promise<StopReason> {
   if (signal.aborted) return 'cancelled';
 
   const budget = new Budget(deps.budget);
@@ -63,6 +89,11 @@ export async function runTurn(
       return 'end_turn';
     }
 
+    // The signal can fire WHILE generate() is in flight. Without this check the
+    // turn proceeds to verify and writes a terminal event for a cancelled
+    // session, which must stay resumable.
+    if (signal.aborted) return 'cancelled';
+
     if (res.unrecoverable === true) {
       deps.journal.append(sessionId, {
         type: 'model.failed',
@@ -82,7 +113,7 @@ export async function runTurn(
 
     if (res.toolCalls.length === 0) {
       // The model wants to stop. It does not get to decide that.
-      const verdict = await deps.verifier.evaluate(round);
+      const verdict = await deps.verifier.evaluate(round, signal);
       deps.journal.append(sessionId, {
         type: 'verification.completed', results: verdict.results,
       });
