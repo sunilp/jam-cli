@@ -1818,6 +1818,29 @@ describe('DefaultPolicy', () => {
     }
   });
 
+  it('escalates a shell command that reaches outside the workspace', () => {
+    // run_command never calls safePath and cat/head/grep are R0, so this was
+    // auto-allowed with no prompt. Confinement is the sandbox's job, but the
+    // human must at least be asked.
+    for (const args of [['/etc/passwd'], ['../../secrets.txt'], ['/tmp/elsewhere/x']]) {
+      const d = p.evaluate({
+        ...base, tool: 'run_command', risk: 'R0',
+        input: { command: 'cat', args }, workspaceRoot: '/w',
+      });
+      expect(d, JSON.stringify(args)).toMatchObject({ type: 'approval_required' });
+    }
+  });
+
+  it('leaves ordinary in-workspace commands alone', () => {
+    for (const args of [['test'], ['run', 'build'], ['src/index.ts']]) {
+      const d = p.evaluate({
+        ...base, tool: 'run_command', risk: 'R1',
+        input: { command: 'npm', args }, workspaceRoot: '/w',
+      });
+      expect(d, JSON.stringify(args)).toMatchObject({ type: 'allow' });
+    }
+  });
+
   it('does not deny paths that merely start with the same letters', () => {
     const d = p.evaluate({
       ...base, tool: 'run_command', risk: 'R1',
@@ -1863,6 +1886,7 @@ Expected: FAIL — cannot resolve `./policy.js` / `./approval.js`
 
 ```ts
 // src/harness/kernel/policy.ts
+import { resolve, sep } from 'node:path';
 import type { PolicyDecision, RiskLevel } from '../events.js';
 
 export type Provenance = 'model' | 'declared' | 'user';
@@ -1917,6 +1941,14 @@ export class DefaultPolicy implements PolicyEngine {
       return { type: 'deny', reason: 'mutation of .jam/ is not permitted' };
     }
 
+    // A shell can read or write anywhere; run_command never calls safePath, and
+    // cat/head/grep are R0, so `cat /etc/passwd` was auto-allowed with no
+    // prompt at all. Full confinement is the sandbox's job (sub-project 2), but
+    // a path that leaves the workspace must at least reach a human first.
+    if (MUTATION_CAPABLE.has(input.tool) && this.escapesWorkspace(input)) {
+      return { type: 'approval_required', reason: 'references a path outside the workspace' };
+    }
+
     // Verification commands were declared by the user, not proposed by the
     // model, so the authority hierarchy already settles them.
     if (input.provenance === 'declared') return { type: 'allow' };
@@ -1928,6 +1960,20 @@ export class DefaultPolicy implements PolicyEngine {
       case 'R3': return { type: 'approval_required', reason: 'potentially destructive' };
       case 'R4': return { type: 'deny', reason: 'external or production effect' };
     }
+  }
+
+  /** Any argument that is an absolute path outside the root, or walks out via `..`. */
+  private escapesWorkspace(input: PolicyInput): boolean {
+    const root = resolve(input.workspaceRoot);
+    return stringsIn(input.input).some((s) => {
+      if (!s.includes('/') && !s.includes('\\')) return false;   // not path-shaped
+      const norm = s.replace(/\\/g, '/');
+      if (norm.startsWith('/')) {
+        const abs = resolve(norm);
+        return abs !== root && !abs.startsWith(root + sep);
+      }
+      return norm.split('/').includes('..');
+    });
   }
 
   private touchesProtectedPath(input: unknown): boolean {
