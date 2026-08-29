@@ -10,12 +10,12 @@ let counter = 0;
  * used anywhere in the journal — see spec section 5.1.
  */
 export function uuidv7(): string {
-  const now = Date.now();
+  const now = Math.max(Date.now(), lastMs);
   if (now === lastMs) {
     counter += 1;
     if (counter > 0xfff) {
       // Exhausted this millisecond's counter space; wait for the next tick.
-      while (Date.now() === lastMs) { /* spin, sub-millisecond */ }
+      while (Math.max(Date.now(), lastMs) === now) { /* spin, sub-millisecond */ }
       return uuidv7();
     }
   } else {
