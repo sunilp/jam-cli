@@ -104,6 +104,21 @@ describe('startup failures', () => {
       spy.mockRestore();
     }
   });
+
+  it('reports an unreadable --task-file without a stack trace', async () => {
+    const errors: string[] = [];
+    const spy = vi.spyOn(process.stderr, 'write')
+      .mockImplementation((s) => { errors.push(String(s)); return true; });
+    try {
+      const code = await runAgentCommand(undefined,
+        { taskFile: '/definitely/not/a/real/path.md' }, {});
+      expect(code).toBe(1);
+      expect(errors.join('')).toContain('cannot start');
+      expect(errors.join('')).not.toContain('at Object.');
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });
 
 describe('runAgent', () => {

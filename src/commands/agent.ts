@@ -220,21 +220,22 @@ export async function runAgentCommand(
   cmdOpts: Record<string, unknown>,
   globalOpts: { provider?: string; model?: string; profile?: string }
 ): Promise<number> {
-  const taskFile = cmdOpts['taskFile'];
-  const resolved = typeof taskFile === 'string'
-    ? await readFile(taskFile, 'utf-8')
-    : task;
-
-  if (resolved === undefined || resolved.trim() === '') {
-    process.stderr.write('A task is required: jam agent "fix the failing tests"\n');
-    return 1;
-  }
-
   // ONE boundary around everything that can throw before the session exists:
-  // the Node version guard, config loading, and provider construction. Without
-  // it an unusable provider or an old runtime crashes with a raw stack trace —
-  // and the version guard exists precisely to print an actionable message.
+  // the task-file read, the Node version guard, config loading and provider
+  // construction. Without it a mistyped path, an unusable provider or an old
+  // runtime crashes with a raw stack trace — and the version guard exists
+  // precisely to print an actionable message.
   try {
+    const taskFile = cmdOpts['taskFile'];
+    const resolved = typeof taskFile === 'string'
+      ? await readFile(taskFile, 'utf-8')
+      : task;
+
+    if (resolved === undefined || resolved.trim() === '') {
+      process.stderr.write('A task is required: jam agent "fix the failing tests"\n');
+      return 1;
+    }
+
     const { createHarnessProvider } = await import('../harness/provider-factory.js');
     return await runAgent({
       task: resolved,
