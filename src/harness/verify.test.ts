@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Verifier, loadRequirements } from './verify.js';
 import { LocalExecutionWorld } from './world/local.js';
+import type { ExecutionWorld } from './world/types.js';
 import { ArtifactStore } from './artifacts.js';
 
 const world = new LocalExecutionWorld();
@@ -75,17 +76,35 @@ describe('Verifier', () => {
     expect(verdict.exhausted).toBe(false);
   });
 
-  it('never reports satisfied when verification was cut short', async () => {
-    const v = new Verifier(world, root, artifacts, [
+  it('never reports satisfied when verification was cut short mid-run', async () => {
+    // The disaster window is an abort BETWEEN requirements, after the first has
+    // PASSED — that leaves a one-entry array where every entry passed, which
+    // reads as satisfied without a completeness check. Pre-aborting is a
+    // different, weaker case: results stays empty and the pre-existing
+    // length > 0 check already blocks it, so a pre-abort test proves nothing.
+    const ac = new AbortController();
+    let runs = 0;
+    const abortAfterFirst: ExecutionWorld = {
+      ...world,
+      subprocess: {
+        run: async (req) => {
+          const r = await world.subprocess.run(req);
+          runs += 1;
+          if (runs === 1) ac.abort();
+          return r;
+        },
+      },
+    };
+
+    const v = new Verifier(abortAfterFirst, root, artifacts, [
       { command: 'node -e "process.exit(0)"', mustExit: 0 },
       { command: 'node -e "process.exit(0)"', mustExit: 0 },
     ], 3);
-    const ac = new AbortController();
-    ac.abort();
     const verdict = await v.evaluate(0, ac.signal);
 
-    expect(verdict.results.length).toBeLessThan(2);
-    expect(verdict.satisfied).toBe(false);
+    expect(verdict.results).toHaveLength(1);        // the first ran
+    expect(verdict.results[0]!.passed).toBe(true);  // and it passed
+    expect(verdict.satisfied).toBe(false);          // and it is STILL not satisfied
     expect(verdict.runnable).toBe(false);
   });
 
