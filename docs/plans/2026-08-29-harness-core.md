@@ -3803,10 +3803,10 @@ git commit -m "feat(harness): naive budget-aware context assembly"
 ```ts
 // src/harness/verify.test.ts
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Verifier } from './verify.js';
+import { Verifier, loadRequirements } from './verify.js';
 import { LocalExecutionWorld } from './world/local.js';
 import { ArtifactStore } from './artifacts.js';
 
@@ -3817,6 +3817,29 @@ let artifacts: ArtifactStore;
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'jam-verify-'));
   artifacts = new ArtifactStore(':memory:');
+});
+
+describe('loadRequirements', () => {
+  it('treats a missing config as no requirements', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'jam-cfg-'));
+    await expect(loadRequirements(world, dir)).resolves.toMatchObject({ requirements: [] });
+  });
+
+  it('is LOUD about a malformed config rather than silently declaring nothing', async () => {
+    // Silently returning [] makes a typo indistinguishable from "no config",
+    // which quietly guarantees the session can never reach COMPLETED_VERIFIED.
+    const dir = await mkdtemp(join(tmpdir(), 'jam-cfg-'));
+    await mkdir(join(dir, '.jam'));
+    await writeFile(join(dir, '.jam', 'config.yaml'), 'verification: [oops\n  bad: :\n');
+    await expect(loadRequirements(world, dir)).rejects.toThrow(/not valid YAML/);
+  });
+
+  it('rejects a verification.required that is not a list', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'jam-cfg-'));
+    await mkdir(join(dir, '.jam'));
+    await writeFile(join(dir, '.jam', 'config.yaml'), 'verification:\n  required: "npm test"\n');
+    await expect(loadRequirements(world, dir)).rejects.toThrow(/must be a list/);
+  });
 });
 
 describe('Verifier', () => {
@@ -3871,6 +3894,33 @@ describe('Verifier', () => {
     const r = (await v.evaluate(0)).results[0]!;
     expect(r.exitCode).toBe(1);
     expect(r.passed).toBe(false);
+  });
+
+  it('distinguishes a timed-out check from one that could not start', async () => {
+    // Both report exitCode -1. Treating a timeout as not-executable would make
+    // the session report COMPLETED_UNVERIFIED instead of COMPLETED_PARTIAL.
+    const slow = new Verifier(world, root, artifacts, [
+      { command: 'node -e "setTimeout(()=>{},60000)"', mustExit: 0 },
+    ], 3);
+    const timedOut = await slow.evaluate(0);
+    expect(timedOut.runnable).toBe(true);      // it ran; it just failed
+    expect(timedOut.satisfied).toBe(false);
+
+    const missing = new Verifier(world, root, artifacts, [
+      { command: 'definitely-not-a-real-binary-xyz', mustExit: 0 },
+    ], 3);
+    expect((await missing.evaluate(0)).runnable).toBe(false);
+  }, 30_000);
+
+  it('requires EVERY declared requirement to pass, not just one', async () => {
+    const v = new Verifier(world, root, artifacts, [
+      { command: 'node -e "process.exit(0)"', mustExit: 0 },
+      { command: 'node -e "process.exit(1)"', mustExit: 0 },
+    ], 3);
+    const verdict = await v.evaluate(0);
+    expect(verdict.runnable).toBe(true);
+    expect(verdict.satisfied).toBe(false);
+    expect(verdict.results.map((r) => r.passed)).toEqual([true, false]);
   });
 
   it('marks a requirement that cannot be executed as not runnable', async () => {
@@ -3996,16 +4046,36 @@ export function shellInvocation(command: string): [string, string[]] {
 export async function loadRequirements(
   world: ExecutionWorld, root: string
 ): Promise<{ requirements: Requirement[]; maxRetries: number }> {
+  let raw: string;
   try {
-    const raw = await world.fs.readFile(join(root, '.jam', 'config.yaml'));
-    const parsed = load(raw) as { verification?: { required?: Requirement[]; maxRetries?: number } };
-    return {
-      requirements: parsed?.verification?.required ?? [],
-      maxRetries: parsed?.verification?.maxRetries ?? 3,
-    };
-  } catch {
-    return { requirements: [], maxRetries: 3 };
+    raw = await world.fs.readFile(join(root, '.jam', 'config.yaml'));
+  } catch (err) {
+    // No config is a legitimate state: the session simply cannot reach
+    // COMPLETED_VERIFIED. Anything else (EACCES, EISDIR) is not, and must not
+    // masquerade as it.
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { requirements: [], maxRetries: 3 };
+    }
+    throw new Error(`Cannot read .jam/config.yaml: ${(err as NodeJS.ErrnoException).code}`);
   }
+
+  // A malformed config must be LOUD. Swallowing it silently yields zero
+  // requirements, which looks exactly like "none declared" — so a typo would
+  // quietly guarantee the session can never verify, and nobody would know why.
+  let parsed: { verification?: { required?: Requirement[]; maxRetries?: number } };
+  try {
+    parsed = load(raw) as typeof parsed;
+  } catch (err) {
+    throw new Error(
+      `.jam/config.yaml is not valid YAML: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+
+  const required = parsed?.verification?.required;
+  if (required !== undefined && !Array.isArray(required)) {
+    throw new Error('.jam/config.yaml: verification.required must be a list.');
+  }
+  return { requirements: required ?? [], maxRetries: parsed?.verification?.maxRetries ?? 3 };
 }
 ```
 
