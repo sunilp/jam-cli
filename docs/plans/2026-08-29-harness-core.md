@@ -15,6 +15,7 @@
 - **No new runtime dependencies.** `zod` is already present; SQLite comes from the built-in `node:sqlite`. UUIDv7 is implemented locally (Task 1), not pulled from `uuid`.
 - **Storage is `node:sqlite` (`DatabaseSync`), never `better-sqlite3`.** Its native binding cannot load on this machine (built for Node 20 ABI 115; running Node 26 needs 147) and cannot be rebuilt offline. `node:sqlite` has **no `db.pragma()`** — issue pragmas with `db.exec('PRAGMA ...')`.
 - **`@types/node` is 20.x and does not declare `node:sqlite`.** Task 2 adds `src/types/node-sqlite.d.ts`; do not attempt to upgrade `@types/node` (no network).
+- **Never `import ... from 'node:sqlite'` directly.** The installed vitest 1.6.1 (vite-node 1.6.1) strips the `node:` prefix from every builtin except `node:test`, then fails to resolve bare `sqlite`, so a static import breaks every test that touches storage. Task 2 creates `src/harness/sqlite.ts`, which loads the driver via `createRequire`; all storage code imports `DatabaseSync` from there. Config-level fixes (`resolve.alias`, `server.deps.external`, `ssr.external`) were all tried and do not work, because the prefix is stripped before config applies.
 - **Pre-existing baseline failure, not yours.** `npm test` on a clean checkout fails 30 tests across `src/trace/*` and `trace-smoke` because those still use `better-sqlite3`. Do not try to fix them. Judge your task only by the tests it adds and the rest of the previously-passing suite.
 - **ESM only.** All relative imports end in `.js` (e.g. `import { x } from './ids.js'`), matching `"type": "module"` and the existing `src/` convention.
 - **Tests are colocated**: `src/harness/foo.ts` is tested by `src/harness/foo.test.ts`. `vitest.config.ts` includes `src/**/*.test.ts`.
@@ -365,7 +366,36 @@ export interface JournalEvent {
 }
 ```
 
-- [ ] **Step 4: Declare the node:sqlite types**
+- [ ] **Step 4: Create the SQLite driver shim**
+
+```ts
+// src/harness/sqlite.ts
+import { createRequire } from 'node:module';
+import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
+
+/**
+ * The one place the SQLite driver is obtained.
+ *
+ * A static `import { DatabaseSync } from 'node:sqlite'` breaks under the
+ * installed vitest 1.6.1: vite-node strips the `node:` prefix from every
+ * builtin except `node:test`, then fails to resolve bare `sqlite`. Loading
+ * through createRequire bypasses that transform and behaves identically at
+ * runtime. Remove this indirection once vitest is upgraded.
+ *
+ * better-sqlite3 is deliberately not used: its native binding is compiled per
+ * Node ABI and cannot be rebuilt offline here.
+ */
+const nodeRequire = createRequire(import.meta.url);
+
+const { DatabaseSync } = nodeRequire('node:sqlite') as {
+  DatabaseSync: new (path: string) => DatabaseSyncType;
+};
+
+export { DatabaseSync };
+export type { DatabaseSyncType };
+```
+
+- [ ] **Step 5: Declare the node:sqlite types**
 
 `@types/node` is 20.x and predates `node:sqlite`, so without this `npm run
 typecheck` fails on the import. Only the surface the harness uses is declared.
@@ -397,13 +427,13 @@ declare module 'node:sqlite' {
 Confirm `tsconfig.json`'s `include` covers `src/**/*.d.ts`. If it only lists
 `src/**/*.ts`, add the pattern rather than moving the file.
 
-- [ ] **Step 5: Write the journal**
+- [ ] **Step 6: Write the journal**
 
 ```ts
 // src/harness/journal.ts
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync } from './sqlite.js';
 import { uuidv7, LogicalClock } from './ids.js';
-import type { JournalEvent, RuntimeEvent, Requirement, TerminalState } from './events.js';
+import type { JournalEvent, RuntimeEvent, Requirement } from './events.js';
 
 export interface SessionRow {
   id: string; cwd: string; task: string; state: string;
@@ -502,7 +532,8 @@ export class Journal {
     }));
   }
 
-  setState(sessionId: string, state: TerminalState | string): void {
+  /** Accepts any SessionState; the journal does not constrain the vocabulary. */
+  setState(sessionId: string, state: string): void {
     this.db.prepare(`UPDATE sessions SET state = ?, updated_at = ? WHERE id = ?`)
       .run(state, Date.now(), sessionId);
   }
@@ -523,16 +554,16 @@ export class Journal {
 }
 ```
 
-- [ ] **Step 6: Run tests to verify they pass**
+- [ ] **Step 7: Run tests to verify they pass**
 
 Run: `npx vitest run src/harness/journal.test.ts && npm run typecheck`
 Expected: PASS, 5 tests; typecheck clean
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add src/harness/events.ts src/harness/journal.ts src/harness/journal.test.ts \
-        src/types/node-sqlite.d.ts
+        src/harness/sqlite.ts src/types/node-sqlite.d.ts
 git commit -m "feat(harness): semantic event journal on node:sqlite"
 ```
 
@@ -605,7 +636,7 @@ Expected: FAIL — cannot resolve `./artifacts.js`
 
 ```ts
 // src/harness/artifacts.ts
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync } from './sqlite.js';
 import { createHash } from 'node:crypto';
 
 export interface ArtifactRef { digest: string; size: number }
