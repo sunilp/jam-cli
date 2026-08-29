@@ -44,6 +44,41 @@ describe('NaiveContext', () => {
     expect(ctx.messages[1]!.content).toBe('keep me');
     const size = ctx.messages.reduce((n, m) => n + m.content.length, 0);
     expect(size).toBeLessThanOrEqual(4000 + SYSTEM_PROMPT.length);
+    // Dropping the NEWEST instead of the oldest would also satisfy the size
+    // check, so pin which end survives: the most recent turn must be there.
+    expect(ctx.messages.at(-1)!.content).toContain('filler 399');
+    j.close();
+  });
+
+  it('lets the model tie each result back to the call that produced it', () => {
+    const j = new Journal(':memory:');
+    const s = j.createSession({ task: 't', cwd: '/w', requirements: [] });
+    j.append(s, { type: 'tool.requested', callId: 'c1', tool: 'search_text',
+                  input: { query: 'needle' }, risk: 'R0' });
+    j.append(s, { type: 'tool.completed', callId: 'c1',
+                  result: { ok: true, preview: 'found 3' }, durationMs: 4 });
+
+    const ctx = new NaiveContext(j, new ToolRegistry()).build(s);
+    const rendered = ctx.messages.map((m) => m.content).join('\n');
+    expect(rendered).toContain('calling search_text');
+    expect(rendered).toContain('search_text ok: found 3');
+    j.close();
+  });
+
+  it('numbers verification attempts so repeats are distinguishable', () => {
+    const j = new Journal(':memory:');
+    const s = j.createSession({ task: 't', cwd: '/w', requirements: [] });
+    const fail = {
+      requirement: 'npm test', exitCode: 1, passed: false, durationMs: 1,
+      outputDigest: 'd', artifactDigest: 'a',
+    };
+    j.append(s, { type: 'verification.completed', results: [fail] });
+    j.append(s, { type: 'verification.completed', results: [fail] });
+
+    const ctx = new NaiveContext(j, new ToolRegistry()).build(s);
+    const rendered = ctx.messages.map((m) => m.content).join('\n');
+    expect(rendered).toContain('attempt 1');
+    expect(rendered).toContain('attempt 2');
     j.close();
   });
 });

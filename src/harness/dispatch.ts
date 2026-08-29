@@ -79,11 +79,20 @@ export async function dispatch(
       callId: call.id, tool: tool.name, risk, reason: decision.reason,
       summary: JSON.stringify(value).slice(0, 400),
     }, signal);
-    if (!granted) decision = { type: 'deny', reason: 'declined by user' };
-    else decision = { type: 'allow' };
-  }
 
-  deps.journal.append(sessionId, { type: 'tool.decided', callId: call.id, decision });
+    // Journal the ORIGINAL approval_required decision, not a rewritten
+    // 'allow'. Overwriting it destroys the fact that a human was asked and
+    // said yes — the audit trail must be able to show human sign-off.
+    deps.journal.append(sessionId, { type: 'tool.decided', callId: call.id, decision });
+    if (!granted) {
+      decision = { type: 'deny', reason: 'declined by user' };
+      deps.journal.append(sessionId, { type: 'tool.decided', callId: call.id, decision });
+    } else {
+      decision = { type: 'allow' };
+    }
+  } else {
+    deps.journal.append(sessionId, { type: 'tool.decided', callId: call.id, decision });
+  }
 
   if (decision.type === 'deny') {
     // A refusal is information for the model, not an exception.

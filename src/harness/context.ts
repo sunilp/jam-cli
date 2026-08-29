@@ -1,6 +1,7 @@
 import type { Journal } from './journal.js';
 import type { ToolRegistry } from './tools/registry.js';
 import type { ModelMessage, ModelRequest } from './model.js';
+import { preview } from './artifacts.js';
 
 export const SYSTEM_PROMPT = [
   'You are an implementation agent operating inside a repository.',
@@ -35,6 +36,11 @@ export class NaiveContext implements ContextProvider {
     const head: ModelMessage[] = [{ role: 'system', content: SYSTEM_PROMPT }];
     const body: ModelMessage[] = [];
 
+    // A result the model cannot tie back to a call is unusable. Nothing else
+    // carries the tool name, so remember it when the call is requested.
+    const toolFor = new Map<string, string>();
+    let verificationRound = 0;
+
     for (const { event } of events) {
       switch (event.type) {
         case 'session.created':
@@ -46,23 +52,38 @@ export class NaiveContext implements ContextProvider {
         case 'model.completed':
           if (event.content !== null) body.push({ role: 'assistant', content: event.content });
           break;
-        case 'tool.completed':
+        case 'tool.requested':
+          toolFor.set(event.callId, event.tool);
+          body.push({
+            role: 'assistant',
+            content: `calling ${event.tool}(${preview(JSON.stringify(event.input), { maxChars: 600 })})`,
+          });
+          break;
+        case 'tool.completed': {
+          const name = toolFor.get(event.callId) ?? 'tool';
           body.push({
             role: 'tool',
             content: event.result.ok
-              ? `[${event.callId}] ok: ${event.result.preview}`
-              : `[${event.callId}] error ${event.result.errorType}: ${event.result.preview}`,
+              ? `${name} ok: ${event.result.preview}`
+              : `${name} error ${event.result.errorType}: ${event.result.preview}`,
           });
           break;
+        }
         case 'tool.decided':
           if (event.decision.type === 'deny') {
-            body.push({ role: 'tool', content: `[${event.callId}] denied: ${event.decision.reason}` });
+            body.push({
+              role: 'tool',
+              content: `${toolFor.get(event.callId) ?? 'tool'} denied: ${event.decision.reason}`,
+            });
           }
           break;
         case 'verification.completed':
+          verificationRound += 1;
           body.push({
             role: 'tool',
-            content: 'verification:\n' + event.results
+            // Numbered: repeated failures otherwise stack as indistinguishable
+            // blocks and the model cannot tell which one is current.
+            content: `verification (attempt ${verificationRound}):\n` + event.results
               .map((r) => `${r.passed ? 'PASS' : 'FAIL'} ${r.requirement} (exit ${r.exitCode})`)
               .join('\n'),
           });
