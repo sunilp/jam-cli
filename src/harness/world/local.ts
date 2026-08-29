@@ -31,6 +31,18 @@ const localSubprocess: SubprocessRuntime = {
   run(req: ProcRequest): Promise<ProcResult> {
     return new Promise<ProcResult>((resolve) => {
       const startedAt = Date.now();
+
+      // addEventListener('abort') never fires on an already-aborted signal, so
+      // without this an aborted caller waits out the FULL timeout (minutes for
+      // a verification command) and is told aborted: false. Never spawn.
+      if (req.signal?.aborted === true) {
+        resolve({
+          exitCode: -1, stdout: '', stderr: '', timedOut: false,
+          aborted: true, spawnFailed: false, durationMs: 0,
+        });
+        return;
+      }
+
       // detached puts the child in its own process group so we can signal the
       // whole tree. Without this a cancelled `npm test` orphans its runner.
       const child = spawn(req.command, req.args, {
@@ -64,18 +76,18 @@ const localSubprocess: SubprocessRuntime = {
       const onAbort = (): void => { aborted = true; killTree(); };
       req.signal?.addEventListener('abort', onAbort, { once: true });
 
-      const finish = (exitCode: number): void => {
+      const finish = (exitCode: number, spawnFailed = false): void => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
         req.signal?.removeEventListener('abort', onAbort);
         resolve({
-          exitCode, stdout, stderr, timedOut, aborted,
+          exitCode, stdout, stderr, timedOut, aborted, spawnFailed,
           durationMs: Date.now() - startedAt,
         });
       };
 
-      child.on('error', () => finish(-1));
+      child.on('error', () => finish(-1, true));
       child.on('close', (code) => finish(code ?? -1));
     });
   },

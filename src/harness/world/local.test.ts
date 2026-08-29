@@ -71,14 +71,48 @@ describe('LocalExecutionWorld.subprocess', () => {
     expect(() => process.kill(grandchild, 0)).toThrow();
   });
 
-  it('aborts on signal', async () => {
+  it('aborts on signal and actually kills the process', async () => {
     const w = new LocalExecutionWorld();
     const ac = new AbortController();
-    setTimeout(() => ac.abort(), 100);
+    const script = 'console.log(process.pid); setTimeout(()=>{},60000);';
+    setTimeout(() => ac.abort(), 150);
     const r = await w.subprocess.run({
-      command: 'node', args: ['-e', 'setTimeout(()=>{},60000)'],
+      command: 'node', args: ['-e', script],
       cwd: process.cwd(), timeoutMs: 30_000, signal: ac.signal,
     });
     expect(r.aborted).toBe(true);
+    const pid = Number(r.stdout.trim());
+    await new Promise((res) => setTimeout(res, 200));
+    expect(() => process.kill(pid, 0)).toThrow();
+  });
+
+  it('returns immediately for a signal aborted before the call', async () => {
+    const w = new LocalExecutionWorld();
+    const ac = new AbortController();
+    ac.abort();
+    const started = Date.now();
+    const r = await w.subprocess.run({
+      command: 'node', args: ['-e', 'setTimeout(()=>{},60000)'],
+      cwd: process.cwd(), timeoutMs: 5_000, signal: ac.signal,
+    });
+    expect(r.aborted).toBe(true);
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
+  it('distinguishes a spawn failure from a killed process', async () => {
+    const w = new LocalExecutionWorld();
+    const missing = await w.subprocess.run({
+      command: 'definitely-not-a-real-binary-xyz', args: [],
+      cwd: process.cwd(), timeoutMs: 10_000,
+    });
+    expect(missing.spawnFailed).toBe(true);
+
+    const killed = await w.subprocess.run({
+      command: 'node', args: ['-e', 'setTimeout(()=>{},60000)'],
+      cwd: process.cwd(), timeoutMs: 300,
+    });
+    expect(killed.exitCode).toBe(-1);
+    expect(killed.spawnFailed).toBe(false);
+    expect(killed.timedOut).toBe(true);
   });
 });

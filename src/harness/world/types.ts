@@ -28,6 +28,12 @@ export interface ProcResult {
   stderr: string;
   timedOut: boolean;
   aborted: boolean;
+  /**
+   * The process could not be started at all (binary missing, EACCES).
+   * Distinct from a process that started and was killed, which also reports
+   * exitCode -1 because `close` gives a null code.
+   */
+  spawnFailed: boolean;
   durationMs: number;
 }
 
