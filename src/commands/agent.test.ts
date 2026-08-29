@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { exitCodeFor, assertNodeSupported, describeStop, runAgent, runAgentCommand } from './agent.js';
+import {
+  exitCodeFor, assertNodeSupported, describeStop, positiveIntOr, runAgent, runAgentCommand,
+} from './agent.js';
 import { MockProvider } from '../harness/model.js';
 import { LocalExecutionWorld } from '../harness/world/local.js';
 import type { ModelProvider } from '../harness/model.js';
@@ -46,6 +48,27 @@ describe('exitCodeFor', () => {
     expect(exitCodeFor('FAILED')).toBe(1);
     expect(exitCodeFor('COMPLETED_UNVERIFIED')).toBe(3);
     expect(exitCodeFor('CANCELLED')).toBe(4);
+  });
+});
+
+describe('positiveIntOr', () => {
+  it('parses a valid value', () => {
+    expect(positiveIntOr('45', 200, '--max-tool-calls')).toBe(45);
+    expect(positiveIntOr(0, 200, '--timeout')).toBe(0);
+    expect(positiveIntOr(undefined, 200, '--timeout')).toBe(200);
+  });
+
+  it('rejects a NaN value instead of silently disabling the budget', () => {
+    // Number('oops') is NaN, and every >= comparison against NaN is false —
+    // the exact defect this guard exists to close: a bad flag must fail
+    // loudly, not run unbounded.
+    expect(() => positiveIntOr('oops', 200, '--max-tool-calls'))
+      .toThrow(/--max-tool-calls must be a non-negative number, got "oops"/);
+  });
+
+  it('rejects a negative value', () => {
+    expect(() => positiveIntOr('-5', 200, '--timeout'))
+      .toThrow(/--timeout must be a non-negative number, got "-5"/);
   });
 });
 

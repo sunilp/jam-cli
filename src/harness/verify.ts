@@ -149,5 +149,27 @@ export async function loadRequirements(
   if (required !== undefined && !Array.isArray(required)) {
     throw new Error('.jam/config.yaml: verification.required must be a list.');
   }
+
+  // `required: ["npm test"]` is the most natural YAML a user would write, and
+  // it parses to an array of bare strings — which Array.isArray happily
+  // accepts. Left unchecked, each entry then has neither `command` nor
+  // `gitDiffCheck`, so the Verifier's own loop silently `continue`s past it:
+  // zero results, COMPLETED_UNVERIFIED, no error. That is exactly the failure
+  // this function's own "must be LOUD" comment exists to prevent.
+  if (required !== undefined) {
+    required.forEach((entry, i) => {
+      const isObject = typeof entry === 'object' && entry !== null && !Array.isArray(entry);
+      const hasCommand = isObject && typeof (entry as Requirement).command === 'string' &&
+        (entry as Requirement).command !== '';
+      const hasGitDiffCheck = isObject && (entry as Requirement).gitDiffCheck === true;
+      if (!isObject || (!hasCommand && !hasGitDiffCheck)) {
+        throw new Error(
+          `.jam/config.yaml: verification.required[${i}] must be an object with ` +
+          `"command" or "gitDiffCheck", got ${JSON.stringify(entry)}`
+        );
+      }
+    });
+  }
+
   return { requirements: required ?? [], maxRetries: parsed?.verification?.maxRetries ?? 3 };
 }

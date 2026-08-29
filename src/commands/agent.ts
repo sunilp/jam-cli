@@ -55,6 +55,22 @@ export function describeStop(stop: StopReason): string {
   return stop === 'cancelled' ? 'cancelled by user' : `budget exhausted (${stop})`;
 }
 
+/**
+ * A NaN budget silently disables the cap: every >= comparison against NaN is
+ * false. `Number('oops')` is NaN, so `--max-tool-calls oops` or `--timeout
+ * oops` would otherwise pass straight through to Budget.check() and the run
+ * would go unbounded — measured at 248 seconds against a run that should
+ * have been capped.
+ */
+export function positiveIntOr(value: unknown, fallback: number, flag: string): number {
+  if (value === undefined) return fallback;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) {
+    throw new Error(`${flag} must be a non-negative number, got "${String(value)}"`);
+  }
+  return Math.floor(n);
+}
+
 export interface AgentOptions {
   task: string;
   cwd: string;
@@ -243,8 +259,8 @@ export async function runAgentCommand(
       provider: await createHarnessProvider(globalOpts),
       extraVerify: cmdOpts['verify'] as string[] | undefined,
       json: cmdOpts['json'] === true,
-      maxToolCalls: Number(cmdOpts['maxToolCalls'] ?? 200),
-      timeoutMs: Number(cmdOpts['timeout'] ?? 30 * 60_000),
+      maxToolCalls: positiveIntOr(cmdOpts['maxToolCalls'], 200, '--max-tool-calls'),
+      timeoutMs: positiveIntOr(cmdOpts['timeout'], 30 * 60_000, '--timeout'),
     });
   } catch (err) {
     process.stderr.write(

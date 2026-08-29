@@ -47,6 +47,43 @@ describe('loadRequirements', () => {
     await writeFile(join(dir, '.jam', 'config.yaml'), 'verification:\n  required: "npm test"\n');
     await expect(loadRequirements(world, dir)).rejects.toThrow(/must be a list/);
   });
+
+  it('rejects a bare-string requirement instead of silently ignoring it', async () => {
+    // `required: ["npm test"]` is the most natural YAML a user would write.
+    // It parses to an array of bare strings, which Array.isArray accepts —
+    // so without per-entry validation this reaches the Verifier, produces
+    // zero results, and reports COMPLETED_UNVERIFIED with no error at all.
+    const dir = await tempConfigDir();
+    await mkdir(join(dir, '.jam'));
+    await writeFile(join(dir, '.jam', 'config.yaml'), 'verification:\n  required:\n    - npm test\n');
+    await expect(loadRequirements(world, dir)).rejects.toThrow(
+      /verification\.required\[0\] must be an object with "command" or "gitDiffCheck", got "npm test"/
+    );
+  });
+
+  it('rejects a requirement object with neither command nor gitDiffCheck', async () => {
+    const dir = await tempConfigDir();
+    await mkdir(join(dir, '.jam'));
+    await writeFile(
+      join(dir, '.jam', 'config.yaml'),
+      'verification:\n  required:\n    - mustExit: 0\n'
+    );
+    await expect(loadRequirements(world, dir)).rejects.toThrow(
+      /verification\.required\[0\] must be an object with "command" or "gitDiffCheck"/
+    );
+  });
+
+  it('accepts a valid mixed list of command and gitDiffCheck requirements', async () => {
+    const dir = await tempConfigDir();
+    await mkdir(join(dir, '.jam'));
+    await writeFile(
+      join(dir, '.jam', 'config.yaml'),
+      'verification:\n  required:\n    - command: npm test\n    - gitDiffCheck: true\n'
+    );
+    await expect(loadRequirements(world, dir)).resolves.toMatchObject({
+      requirements: [{ command: 'npm test' }, { gitDiffCheck: true }],
+    });
+  });
 });
 
 describe('Verifier', () => {
