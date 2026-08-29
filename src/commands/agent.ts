@@ -167,7 +167,7 @@ export async function runAgent(opts: AgentOptions): Promise<number> {
         stdout.write(JSON.stringify({ ...e, logicalClock: e.logicalClock.toString() }) + '\n');
       }
     } else {
-      stdout.write(renderReport(events, state, stoppedBecause));
+      stdout.write(renderReport(events, state, sessionId, stoppedBecause));
     }
     return exitCodeFor(state);
   } finally {
@@ -178,7 +178,8 @@ export async function runAgent(opts: AgentOptions): Promise<number> {
 }
 
 function renderReport(
-  events: ReturnType<Journal['replay']>, state: TerminalState, stoppedBecause?: string
+  events: ReturnType<Journal['replay']>, state: TerminalState,
+  sessionId: string, stoppedBecause?: string
 ): string {
   const changed = new Set<string>();
   const lines: string[] = [];
@@ -205,8 +206,12 @@ function renderReport(
   // pressed Ctrl-C, which is the confusion this whole fix exists to remove.
   out.push(stoppedBecause ?? state, '');
   // Only a session that stopped rather than finished stays resumable — a
-  // COMPLETED_VERIFIED run should not be told to resume.
-  if (stoppedBecause !== undefined) out.push('  Resume with: jam agent --resume <id>', '');
+  // COMPLETED_VERIFIED run should not be told to resume. Name the session id,
+  // not a --resume flag: that flag does not exist in index.ts yet, and the id
+  // is what actually matters to someone who wants to pick this back up.
+  if (stoppedBecause !== undefined) {
+    out.push(`  Session ${sessionId} kept; nothing was finalised.`, '');
+  }
   return out.join('\n');
 }
 
@@ -225,14 +230,25 @@ export async function runAgentCommand(
     return 1;
   }
 
-  const { createHarnessProvider } = await import('../harness/provider-factory.js');
-  return runAgent({
-    task: resolved,
-    cwd: process.cwd(),
-    provider: await createHarnessProvider(globalOpts),
-    extraVerify: cmdOpts['verify'] as string[] | undefined,
-    json: cmdOpts['json'] === true,
-    maxToolCalls: Number(cmdOpts['maxToolCalls'] ?? 200),
-    timeoutMs: Number(cmdOpts['timeout'] ?? 30 * 60_000),
-  });
+  // ONE boundary around everything that can throw before the session exists:
+  // the Node version guard, config loading, and provider construction. Without
+  // it an unusable provider or an old runtime crashes with a raw stack trace —
+  // and the version guard exists precisely to print an actionable message.
+  try {
+    const { createHarnessProvider } = await import('../harness/provider-factory.js');
+    return await runAgent({
+      task: resolved,
+      cwd: process.cwd(),
+      provider: await createHarnessProvider(globalOpts),
+      extraVerify: cmdOpts['verify'] as string[] | undefined,
+      json: cmdOpts['json'] === true,
+      maxToolCalls: Number(cmdOpts['maxToolCalls'] ?? 200),
+      timeoutMs: Number(cmdOpts['timeout'] ?? 30 * 60_000),
+    });
+  } catch (err) {
+    process.stderr.write(
+      `jam agent: cannot start — ${err instanceof Error ? err.message : String(err)}\n`
+    );
+    return 1;
+  }
 }

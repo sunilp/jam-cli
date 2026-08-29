@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { exitCodeFor, assertNodeSupported, describeStop, runAgent, runAgentCommand } from './agent.js';
 import { MockProvider } from '../harness/model.js';
+import { LocalExecutionWorld } from '../harness/world/local.js';
 import type { ModelProvider } from '../harness/model.js';
 
 /**
@@ -82,6 +83,29 @@ describe('runAgentCommand', () => {
   });
 });
 
+describe('startup failures', () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it('reports an unusable provider without a stack trace', async () => {
+    const errors: string[] = [];
+    const spy = vi.spyOn(process.stderr, 'write')
+      .mockImplementation((s) => { errors.push(String(s)); return true; });
+    try {
+      // The bogus name goes in globalOpts (the third argument), which is what
+      // createHarnessProvider actually reads — cmdOpts (the second argument)
+      // has no `provider` field in the real command wiring in index.ts.
+      const code = await runAgentCommand(
+        'do a thing', {}, { provider: 'definitely-not-a-provider-xyz' }
+      );
+      expect(code).toBe(1);
+      expect(errors.join('')).toContain('cannot start');
+      expect(errors.join('')).not.toContain('at Object.'); // no stack frames
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
 describe('runAgent', () => {
   let cwd: string;
 
@@ -153,12 +177,12 @@ describe('runAgent', () => {
 
     // A session that FINISHED (as opposed to one that was stopped) must print
     // exactly its terminal state — no cause line grafted onto it, and no
-    // resume hint, since a COMPLETED_VERIFIED run is not resumable and should
-    // never look like one that is. Checking the exact line (not just a
-    // substring) rules out an accidental `COMPLETED_VERIFIED — <something>`.
+    // "session kept" hint, since a COMPLETED_VERIFIED run is not resumable
+    // and should never look like one that is. Checking the exact line (not
+    // just a substring) rules out an accidental `COMPLETED_VERIFIED — <something>`.
     const reportLines = written.split('\n');
     expect(reportLines).toContain('COMPLETED_VERIFIED');
-    expect(written).not.toContain('Resume with');
+    expect(written).not.toContain('kept; nothing was finalised');
   });
 
   it('reports a blown tool-call budget as budget exhaustion, not a user ' +
@@ -195,7 +219,9 @@ describe('runAgent', () => {
     // since "CANCELLED — budget exhausted" would still tell the user someone
     // pressed Ctrl-C.
     expect(written).toContain('budget exhausted (max_turn_requests)');
-    expect(written).toContain('Resume with: jam agent --resume');
+    // Names the session id kept for later, not a --resume flag that does not
+    // exist in index.ts.
+    expect(written).toMatch(/Session .+ kept; nothing was finalised\./);
     expect(written).not.toContain('CANCELLED');
   });
 
@@ -224,6 +250,67 @@ describe('runAgent', () => {
     const written = stdout.mock.calls.map((c) => String(c[0])).join('');
     expect(written).toContain('cancelled by user');
     expect(written).not.toContain('CANCELLED');
+  });
+
+  it('creates a checkpoint and stamps its id onto file.modified when a ' +
+     'mutating tool runs, in a real git repo (guarantee 5 wiring)', async () => {
+    const world = new LocalExecutionWorld();
+    const git = async (args: string[]): Promise<{ stdout: string; exitCode: number }> => {
+      const r = await world.subprocess.run({ command: 'git', args, cwd, timeoutMs: 15_000 });
+      if (r.exitCode !== 0) throw new Error(`git ${args.join(' ')} failed: ${r.stderr}`);
+      return r;
+    };
+
+    await git(['init', '-q']);
+    await git(['config', 'user.email', 't@example.com']);
+    await git(['config', 'user.name', 'T']);
+    await writeFile(join(cwd, 'a.txt'), 'original\n');
+    await git(['add', '.']);
+    await git(['commit', '-qm', 'init']);
+
+    // A real git-generated unified diff rather than a hand-written one, so
+    // the format is guaranteed valid. Restore the working tree afterward so
+    // apply_patch — driven through the real runAgent/loop/dispatch stack, not
+    // called directly — is what actually performs the mutation.
+    await writeFile(join(cwd, 'a.txt'), 'modified\n');
+    const diff = await git(['diff']);
+    await git(['checkout', '--', 'a.txt']);
+    expect(diff.stdout).toContain('a.txt');
+
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const code = await runAgent({
+      task: 'do the thing',
+      cwd,
+      provider: new MockProvider([
+        { content: null, toolCalls: [
+          { id: '1', name: 'apply_patch', arguments: { patch: diff.stdout } },
+        ] },
+        { content: 'done', toolCalls: [] },
+      ]),
+      json: true,
+      dbPath: ':memory:',
+    });
+
+    // COMPLETED_UNVERIFIED: nothing declared to verify. The exit code is
+    // incidental here — what this test guards is guarantee 5 (spec 12: one
+    // checkpoint per mutating batch), which had zero coverage: dropping
+    // `checkpoints` from the deps object passed to runTurn in runAgent fails
+    // no other test in this suite.
+    expect(code).toBe(3);
+
+    const lines = stdout.mock.calls.map((c) => String(c[0]).trim()).filter((l) => l !== '');
+    const events = lines.map((l) => JSON.parse(l) as { event: Record<string, unknown> });
+
+    const checkpointEvent = events.find((e) => e.event['type'] === 'checkpoint.created');
+    const fileModifiedEvent = events.find((e) => e.event['type'] === 'file.modified');
+
+    expect(checkpointEvent).toBeDefined();
+    expect(fileModifiedEvent).toBeDefined();
+    const checkpointId = (checkpointEvent?.event as { checkpointId?: string } | undefined)
+      ?.checkpointId;
+    expect(checkpointId).toBeTruthy();
+    expect((fileModifiedEvent?.event as { checkpointId?: string } | undefined)?.checkpointId)
+      .toBe(checkpointId);
   });
 
   it('fails fast with a clear message when .jam/config.yaml is malformed, ' +
