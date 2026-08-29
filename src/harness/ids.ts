@@ -14,9 +14,10 @@ export function uuidv7(): string {
   if (now === lastMs) {
     counter += 1;
     if (counter > 0xfff) {
-      // Exhausted this millisecond's counter space; wait for the next tick.
-      while (Math.max(Date.now(), lastMs) === now) { /* spin, sub-millisecond */ }
-      return uuidv7();
+      // Exhausted this millisecond's counter space.
+      // Per RFC 9562, borrow a millisecond from the future and continue.
+      lastMs += 1;
+      counter = 0;
     }
   } else {
     lastMs = now;
@@ -24,13 +25,23 @@ export function uuidv7(): string {
   }
 
   const b = randomBytes(16);
-  b.writeUIntBE(now, 0, 6);
+  b.writeUIntBE(lastMs, 0, 6);
   b[6] = 0x70 | ((counter >> 8) & 0x0f);
   b[7] = counter & 0xff;
   b[8] = 0x80 | (b[8]! & 0x3f);
 
   const h = b.toString('hex');
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
+/**
+ * Test seam. Clears the module-level millisecond and counter state so a test
+ * that stubs `Date.now` starts from a known point instead of inheriting
+ * whatever the previous test left behind.
+ */
+export function resetUuidv7State(): void {
+  lastMs = 0;
+  counter = 0;
 }
 
 /** Ordering without positional identity. Restored from the journal's max on resume. */

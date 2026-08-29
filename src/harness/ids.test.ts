@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { uuidv7, LogicalClock } from './ids.js';
+import { uuidv7, LogicalClock, resetUuidv7State } from './ids.js';
 
 describe('uuidv7', () => {
   it('produces a valid v7 uuid', () => {
@@ -20,45 +20,61 @@ describe('uuidv7', () => {
   it('generates ids with increasing timestamps despite clock regression', () => {
     const mockNow = vi.spyOn(Date, 'now');
 
-    // Generate first id at t=1000
-    mockNow.mockReturnValue(1000);
-    const id1 = uuidv7();
+    try {
+      resetUuidv7State();
 
-    // Clock steps back to 950
-    mockNow.mockReturnValue(950);
-    const id2 = uuidv7();
+      // Generate first id at t=1000
+      mockNow.mockReturnValue(1000);
+      const id1 = uuidv7();
 
-    // Ids should still sort in generation order despite the backward clock step
-    expect([id1, id2].sort()).toEqual([id1, id2]);
+      // Clock steps back to 950
+      mockNow.mockReturnValue(950);
+      const id2 = uuidv7();
 
-    mockNow.mockRestore();
+      // Ids should still sort in generation order despite the backward clock step
+      expect([id1, id2].sort()).toEqual([id1, id2]);
+    } finally {
+      mockNow.mockRestore();
+    }
   });
 
-  it('generates many unique and ordered ids even with repeated counter exhaustion', () => {
+  it('exhausts counter and borrows milliseconds, maintaining order', () => {
     const mockNow = vi.spyOn(Date, 'now');
 
-    const baseMs = 8000;
-    let callCount = 0;
+    try {
+      resetUuidv7State();
 
-    // Advance time after enough calls to allow multiple counter exhaustions
-    mockNow.mockImplementation(() => {
-      callCount++;
-      // Divide the timeline into 10 segments of 1500 calls each
-      // so the timestamp advances every ~1500 calls
-      const segmentSize = 1500;
-      return baseMs + Math.floor((callCount - 1) / segmentSize);
-    });
+      // Freeze time at a single constant value
+      const frozenMs = 9000;
+      mockNow.mockReturnValue(frozenMs);
 
-    // Generate 1000 ids (enough to trigger counter exhaustion multiple times with reset)
-    const ids = Array.from({ length: 1000 }, () => uuidv7());
+      // Generate 5000 ids, well past the 4096 counter limit
+      // This forces the borrow mechanism to activate multiple times
+      const ids = Array.from({ length: 5000 }, () => uuidv7());
 
-    // All ids should be unique
-    expect(new Set(ids).size).toBe(1000);
+      // All ids must be unique
+      expect(new Set(ids).size).toBe(5000);
 
-    // All ids should sort in generation order
-    expect([...ids].sort()).toEqual(ids);
+      // All ids must still be in sorted order
+      expect([...ids].sort()).toEqual(ids);
 
-    mockNow.mockRestore();
+      // Verify the borrow actually happened:
+      // Extract the 48-bit timestamp from first and last id (first 12 hex chars, no dashes)
+      const removeUuidDashes = (uuid: string) => uuid.replace(/-/g, '');
+      const firstHex = removeUuidDashes(ids[0]!);
+      const lastHex = removeUuidDashes(ids[ids.length - 1]!);
+      const firstTimestamp = firstHex.slice(0, 12);
+      const lastTimestamp = lastHex.slice(0, 12);
+
+      // The timestamp must have advanced due to borrowing
+      // (greater timestamp indicates time borrowed from the future)
+      // Convert hex strings to numbers for comparison
+      expect(parseInt(lastTimestamp, 16)).toBeGreaterThan(
+        parseInt(firstTimestamp, 16)
+      );
+    } finally {
+      mockNow.mockRestore();
+    }
   });
 });
 
