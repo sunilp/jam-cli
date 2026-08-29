@@ -56,4 +56,35 @@ describe('DefaultPolicy', () => {
     });
     expect(d.type).toBe('deny');
   });
+
+  it('denies shell access to .jam/, which is otherwise a way around the guard', () => {
+    for (const args of [
+      ['-c', 'echo "verification: {}" > .jam/config.yaml'],
+      ['-c', 'rm ./.jam/config.yaml'],
+      ['-c', 'cat a/../.jam/config.yaml > /dev/null'],
+      ['/w/.jam/config.yaml'],
+      ['.jam\\config.yaml'],
+      ['-rf', '.jam'],
+    ]) {
+      const d = p.evaluate({
+        ...base, tool: 'run_command', risk: 'R2', input: { command: 'sh', args },
+      });
+      expect(d, `args ${JSON.stringify(args)}`).toMatchObject({ type: 'deny' });
+    }
+  });
+
+  it('does not deny paths that merely start with the same letters', () => {
+    const d = p.evaluate({
+      ...base, tool: 'run_command', risk: 'R1',
+      input: { command: 'cat', args: ['.jamfile', 'src/myjam/x.ts'] },
+    });
+    expect(d.type).not.toBe('deny');
+  });
+
+  it('still allows reading .jam through the non-mutating read_file tool', () => {
+    const d = p.evaluate({
+      ...base, tool: 'read_file', risk: 'R0', input: { path: '.jam/config.yaml' },
+    });
+    expect(d.type).toBe('allow');
+  });
 });
