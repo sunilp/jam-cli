@@ -4,6 +4,27 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { exitCodeFor, assertNodeSupported, describeStop, runAgent, runAgentCommand } from './agent.js';
 import { MockProvider } from '../harness/model.js';
+import type { ModelProvider } from '../harness/model.js';
+
+/**
+ * A provider whose generate() never resolves on its own — only when the
+ * caller's signal aborts. Used to reach the real cancellation path through
+ * runAgent: unlike a fixed delay racing a fixed wait, there is no upper-bound
+ * timing assumption here, only a lower one (the simulated SIGINT must be
+ * emitted after runAgent has registered its handler, which the test gives a
+ * generous margin for).
+ */
+function abortAwareProvider(): ModelProvider {
+  return {
+    name: 'abort-aware',
+    model: 'abort-aware',
+    capabilities: () => Promise.resolve({ toolCalling: true, streaming: false, contextWindow: 200_000 }),
+    generate: (_req, signal) => new Promise((resolve) => {
+      signal.addEventListener('abort', () => resolve({ content: null, toolCalls: [] }), { once: true });
+    }),
+    countTokens: () => Promise.resolve(10),
+  };
+}
 
 describe('assertNodeSupported', () => {
   it('accepts Node 22.5 and newer', () => {
@@ -129,7 +150,15 @@ describe('runAgent', () => {
     const written = stdout.mock.calls.map((c) => String(c[0])).join('');
     expect(written).toContain('Verification:');
     expect(written).toContain('✓ true');
-    expect(written).toContain('COMPLETED_VERIFIED');
+
+    // A session that FINISHED (as opposed to one that was stopped) must print
+    // exactly its terminal state — no cause line grafted onto it, and no
+    // resume hint, since a COMPLETED_VERIFIED run is not resumable and should
+    // never look like one that is. Checking the exact line (not just a
+    // substring) rules out an accidental `COMPLETED_VERIFIED — <something>`.
+    const reportLines = written.split('\n');
+    expect(reportLines).toContain('COMPLETED_VERIFIED');
+    expect(written).not.toContain('Resume with');
   });
 
   it('reports a blown tool-call budget as budget exhaustion, not a user ' +
@@ -161,16 +190,40 @@ describe('runAgent', () => {
 
     const written = stdout.mock.calls.map((c) => String(c[0])).join('');
     // The behavior that actually matters: the human-readable report must say
-    // *why* the run stopped, not just that it did.
+    // *why* the run stopped, not just that it did — and the CANCELLED
+    // placeholder must be fully replaced, not merely prefixed onto the cause,
+    // since "CANCELLED — budget exhausted" would still tell the user someone
+    // pressed Ctrl-C.
     expect(written).toContain('budget exhausted (max_turn_requests)');
     expect(written).toContain('Resume with: jam agent --resume');
-    // NOTE: the report line is literally `${state} — ${stoppedBecause}`, and
-    // `state` itself is still the fallback literal 'CANCELLED' (unchanged, as
-    // above) — so the line reads "CANCELLED — budget exhausted
-    // (max_turn_requests)", not a CANCELLED-free string. This assertion
-    // checks for the qualified form rather than asserting the bare word
-    // 'CANCELLED' is absent, since it is not: it is still the state prefix.
-    expect(written).toContain('CANCELLED — budget exhausted (max_turn_requests)');
+    expect(written).not.toContain('CANCELLED');
+  });
+
+  it('reports a genuine Ctrl-C as lowercase "cancelled by user", never the ' +
+     'CANCELLED enum name, and still exits 4', async () => {
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    const runPromise = runAgent({
+      task: 'do the thing',
+      cwd,
+      provider: abortAwareProvider(),
+      dbPath: ':memory:',
+    });
+
+    // Give runAgent time to run loadRequirements (a real, if ENOENT, fs read)
+    // and register its SIGINT handler before simulating the signal.
+    // process.emit('SIGINT') invokes the same listener a real OS signal
+    // would — no actual signal delivery needed, and no other test is left
+    // holding a listener since runAgent removes its own in a `finally`.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    process.emit('SIGINT');
+
+    const code = await runPromise;
+    expect(code).toBe(4);
+
+    const written = stdout.mock.calls.map((c) => String(c[0])).join('');
+    expect(written).toContain('cancelled by user');
+    expect(written).not.toContain('CANCELLED');
   });
 
   it('fails fast with a clear message when .jam/config.yaml is malformed, ' +

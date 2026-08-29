@@ -200,7 +200,10 @@ function renderReport(
   }
   // Every line below comes from a VerificationResult, never from model prose.
   if (lines.length > 0) out.push('Verification:', ...lines, '');
-  out.push(stoppedBecause === undefined ? state : `${state} — ${stoppedBecause}`, '');
+  // A stopped session has no terminal state, so print the cause instead of the
+  // CANCELLED placeholder — "CANCELLED — budget exhausted" tells the user they
+  // pressed Ctrl-C, which is the confusion this whole fix exists to remove.
+  out.push(stoppedBecause ?? state, '');
   // Only a session that stopped rather than finished stays resumable — a
   // COMPLETED_VERIFIED run should not be told to resume.
   if (stoppedBecause !== undefined) out.push('  Resume with: jam agent --resume <id>', '');
