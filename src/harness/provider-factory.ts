@@ -2,7 +2,7 @@ import { createProvider } from '../providers/factory.js';
 import { loadConfig, getActiveProfile } from '../config/loader.js';
 import type { ModelProvider, ModelRequest, ModelTurnResult, ProviderCapabilities } from './model.js';
 import type { ProviderToolDefinition } from './tools/registry.js';
-import type { ProviderAdapter, ToolDefinition } from '../providers/base.js';
+import type { ProviderAdapter, ToolDefinition, ChatWithToolsResponse } from '../providers/base.js';
 import type { CliOverrides } from '../config/schema.js';
 
 /**
@@ -22,9 +22,11 @@ function toToolDefinitions(tools: ProviderToolDefinition[]): ToolDefinition[] {
 /**
  * Adapts jam's existing ProviderAdapter to the harness ModelProvider seam.
  * The loop must contain no provider-specific behavior, so all normalization
- * happens here.
+ * happens here. Exported for testing (provider-factory.test.ts constructs it
+ * directly against a fake ProviderAdapter, rather than mocking config/loader
+ * and providers/factory just to exercise generate()'s own logic).
  */
-class AdaptedProvider implements ModelProvider {
+export class AdaptedProvider implements ModelProvider {
   constructor(
     private readonly adapter: ProviderAdapter,
     readonly name: string,
@@ -53,7 +55,7 @@ class AdaptedProvider implements ModelProvider {
     // jam's own Message role has no 'tool' member; tool results are folded
     // into user turns. Nothing is lost, because the journal is the real
     // history — this mapping only affects what the model sees this turn.
-    const res = await chat(
+    const chatPromise = chat(
       req.messages.map((m) => ({
         role: m.role === 'tool' ? ('user' as const) : m.role,
         content: m.content,
@@ -61,6 +63,26 @@ class AdaptedProvider implements ModelProvider {
       toToolDefinitions(req.tools),
       req.maxTokens === undefined ? undefined : { maxTokens: req.maxTokens }
     );
+    // jam's ProviderAdapter.chatWithTools takes no AbortSignal (do not modify
+    // src/providers), so there is no way to cancel the in-flight HTTP request
+    // itself — Ctrl-C could not interrupt the single longest operation in the
+    // loop. A rejection here after the abort branch below has already won the
+    // race must not surface as an unhandled rejection.
+    chatPromise.catch(() => { /* observed via the race below, or discarded */ });
+
+    // Racing makes generate() RESOLVE PROMPTLY on abort, so the loop becomes
+    // responsive to Ctrl-C again. This does NOT cancel the request: the real
+    // chatWithTools call keeps running in the background regardless of which
+    // side of the race wins, and its eventual result (or error) is simply
+    // discarded once an abort has already been reported.
+    const aborted = new Promise<ChatWithToolsResponse>((resolve) => {
+      if (signal.aborted) { resolve({ content: null, toolCalls: [] }); return; }
+      signal.addEventListener(
+        'abort', () => resolve({ content: null, toolCalls: [] }), { once: true }
+      );
+    });
+
+    const res = await Promise.race([chatPromise, aborted]);
 
     return {
       content: res.content,

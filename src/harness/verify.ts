@@ -157,7 +157,11 @@ export async function loadRequirements(
   // zero results, COMPLETED_UNVERIFIED, no error. That is exactly the failure
   // this function's own "must be LOUD" comment exists to prevent.
   if (required !== undefined) {
-    required.forEach((entry, i) => {
+    // Typed as `unknown` here, not the declared `Requirement`: `parsed` above
+    // is produced by casting js-yaml's untyped output, which is a lie about
+    // runtime shape — a bare string in the YAML really does reach this
+    // callback as a string, whatever the static type claims.
+    required.forEach((entry: unknown, i) => {
       const isObject = typeof entry === 'object' && entry !== null && !Array.isArray(entry);
       const hasCommand = isObject && typeof (entry as Requirement).command === 'string' &&
         (entry as Requirement).command !== '';
