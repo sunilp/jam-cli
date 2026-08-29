@@ -2284,6 +2284,24 @@ describe('CheckpointStore', () => {
     expect(await readFile(join(root, 'a.txt'), 'utf-8')).toBe('original\n');
   });
 
+  it('reports files it could not remove instead of claiming a full rollback', async () => {
+    // git checkout <ref> -- . only touches paths present in the checkpoint, so
+    // a file created afterwards survives. Silently leaving it would mean
+    // restore() reports success on a tree that is not back to its old state.
+    const store = new CheckpointStore(world, root);
+    const cp = await store.create('before edit');
+
+    await writeFile(join(root, 'a.txt'), 'modified\n');
+    await writeFile(join(root, 'new.txt'), 'created by the agent\n');
+    await git(['add', 'new.txt']);
+
+    const result = await store.restore(cp.id);
+
+    expect(await readFile(join(root, 'a.txt'), 'utf-8')).toBe('original\n');
+    expect(result.reverted).toContain('a.txt');
+    expect(result.notRemoved).toEqual(['new.txt']);
+  });
+
   it('lists checkpoints newest first', async () => {
     const store = new CheckpointStore(world, root);
     const one = await store.create('one');
@@ -2308,6 +2326,19 @@ import { uuidv7 } from './ids.js';
 import type { ExecutionWorld } from './world/types.js';
 
 export interface CheckpointInfo { id: string; ref: string; label: string; at: number }
+
+export interface RestoreResult {
+  /** Paths reverted to their checkpoint content. */
+  reverted: string[];
+  /**
+   * Paths that exist now but not in the checkpoint — files created after it.
+   * `git checkout <ref> -- .` cannot remove them, and deleting them blindly
+   * would risk destroying work the developer created alongside the agent. So
+   * they are REPORTED, never silently left behind: a rollback that quietly
+   * restores only part of the tree is worse than one that says what it missed.
+   */
+  notRemoved: string[];
+}
 
 /**
  * Git-backed and out of the way of the developer's own history: checkpoints are
@@ -2340,10 +2371,24 @@ export class CheckpointStore {
     return info;
   }
 
-  async restore(id: string): Promise<void> {
+  async restore(id: string): Promise<RestoreResult> {
     const info = this.meta.get(id);
     if (!info) throw new Error(`Unknown checkpoint: ${id}`);
+
+    // Everything tracked in the checkpoint, before we change anything.
+    const inCheckpoint = new Set(
+      (await this.git(['ls-tree', '-r', '--name-only', info.ref]))
+        .split('\n').filter((l) => l !== '')
+    );
+    const nowTracked = (await this.git(['ls-files']))
+      .split('\n').filter((l) => l !== '');
+
     await this.git(['checkout', info.ref, '--', '.']);
+
+    return {
+      reverted: [...inCheckpoint],
+      notRemoved: nowTracked.filter((f) => !inCheckpoint.has(f)),
+    };
   }
 
   async list(): Promise<CheckpointInfo[]> {
