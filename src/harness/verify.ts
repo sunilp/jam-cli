@@ -105,14 +105,34 @@ export function shellInvocation(command: string): [string, string[]] {
 export async function loadRequirements(
   world: ExecutionWorld, root: string
 ): Promise<{ requirements: Requirement[]; maxRetries: number }> {
+  let raw: string;
   try {
-    const raw = await world.fs.readFile(join(root, '.jam', 'config.yaml'));
-    const parsed = load(raw) as { verification?: { required?: Requirement[]; maxRetries?: number } };
-    return {
-      requirements: parsed?.verification?.required ?? [],
-      maxRetries: parsed?.verification?.maxRetries ?? 3,
-    };
-  } catch {
-    return { requirements: [], maxRetries: 3 };
+    raw = await world.fs.readFile(join(root, '.jam', 'config.yaml'));
+  } catch (err) {
+    // No config is a legitimate state: the session simply cannot reach
+    // COMPLETED_VERIFIED. Anything else (EACCES, EISDIR) is not, and must not
+    // masquerade as it.
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { requirements: [], maxRetries: 3 };
+    }
+    throw new Error(`Cannot read .jam/config.yaml: ${(err as NodeJS.ErrnoException).code}`);
   }
+
+  // A malformed config must be LOUD. Swallowing it silently yields zero
+  // requirements, which looks exactly like "none declared" — so a typo would
+  // quietly guarantee the session can never verify, and nobody would know why.
+  let parsed: { verification?: { required?: Requirement[]; maxRetries?: number } };
+  try {
+    parsed = load(raw) as typeof parsed;
+  } catch (err) {
+    throw new Error(
+      `.jam/config.yaml is not valid YAML: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+
+  const required = parsed?.verification?.required;
+  if (required !== undefined && !Array.isArray(required)) {
+    throw new Error('.jam/config.yaml: verification.required must be a list.');
+  }
+  return { requirements: required ?? [], maxRetries: parsed?.verification?.maxRetries ?? 3 };
 }
