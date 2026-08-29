@@ -123,14 +123,20 @@ function clampSection(lines: string[], budget: number): Section {
       // beginning. "1 line elided" with no content is useless to a model
       // trying to read its own stack trace.
       let consumed = i;
+      // The REMAINDER of a truncated line is content the model will not see.
+      // It must be reported as dropped, or error text sitting past the cutoff
+      // vanishes from the error scan entirely — which is what happens to
+      // dispatch's JSON-serialised tool output, always one giant line.
+      let remainder: string[] = [];
       if (kept.length === 0 && room > 120) {
         kept.push(`${line.slice(0, room - 60)}… line truncated …`);
+        remainder = [line.slice(room - 60)];
         consumed = i + 1;
       }
       if (consumed < lines.length) {
         kept.push(`… ${lines.length - consumed} more lines elided …`);
       }
-      return { kept, dropped: lines.slice(consumed) };
+      return { kept, dropped: [...remainder, ...lines.slice(consumed)] };
     }
     kept.push(line);
     used += line.length + 1;

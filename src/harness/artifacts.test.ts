@@ -64,6 +64,27 @@ describe('preview', () => {
     expect(p).toContain('line truncated');
   });
 
+  // KNOWN LIMITATION, tracked deliberately with `.fails` rather than weakened
+  // or deleted: the remainder of a truncated line IS now scanned for error
+  // text (previously it was invisible to detection entirely — see the next
+  // test), so `--- error lines ---` correctly appears. But the error block
+  // itself re-truncates that same oversized remainder through clampSection,
+  // keeping only its first ~2,340 chars. When the error text sits deeper into
+  // the remainder than that (as here, 20,000 chars in), it is detected but
+  // not actually shown — only the generic block header and a "line
+  // truncated" notice survive. The full text remains retrievable from the
+  // artifact store. Locating and centering a window on the matched substring
+  // would close this, but that is a different, more invasive algorithm than
+  // was directed here, so it is recorded rather than built unprompted.
+  it.fails('finds error text past the cutoff inside a single truncated line', () => {
+    const oneLine = 'x'.repeat(20_000) + ' Error: something failed at step 5000 ' + 'y'.repeat(20_000);
+    const p = preview(oneLine);
+
+    expect(p.length).toBeLessThan(20_000);
+    expect(p).toContain('--- error lines ---');
+    expect(p).toContain('Error: something failed at step 5000');
+  });
+
   it('finds error lines dropped by the character budget, not just by line slicing', () => {
     const lines = Array.from({ length: 60 }, (_, i) => `line ${i} ` + 'x'.repeat(2000));
     lines[55] = 'Error: exploded near the end ' + 'y'.repeat(500);
