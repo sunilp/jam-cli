@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { mkdtemp, writeFile, mkdir, readFile } from 'node:fs/promises';
+import { describe, it, expect, afterEach } from 'vitest';
+import { mkdtemp, writeFile, mkdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runTurn } from './loop.js';
@@ -19,6 +19,13 @@ import type { Requirement } from './events.js';
 
 const world = new LocalExecutionWorld();
 
+// Every fixture() call creates a real tmp repo; track them so afterEach can
+// remove them regardless of which test created them or whether it passed.
+const createdRoots: string[] = [];
+afterEach(async () => {
+  await Promise.all(createdRoots.splice(0).map((d) => rm(d, { recursive: true, force: true })));
+});
+
 /**
  * A fixture repo whose test suite fails until User.email comparison is made
  * case-insensitive. The scripted model performs the section 86 flow:
@@ -26,6 +33,7 @@ const world = new LocalExecutionWorld();
  */
 async function fixture(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'jam-e2e-'));
+  createdRoots.push(root);
   const git = async (args: string[]): Promise<void> => {
     const r = await world.subprocess.run({ command: 'git', args, cwd: root, timeoutMs: 15_000 });
     if (r.exitCode !== 0) throw new Error(r.stderr);
