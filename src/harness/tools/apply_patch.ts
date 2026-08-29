@@ -49,9 +49,13 @@ export const applyPatchTool: Tool<z.infer<typeof input>, { changedFiles: string[
       } };
     }
 
+    // numstat prints "3\t1\tpath" for text and "-\t-\tpath" for BINARY files.
+    // A digits-only pattern silently drops binary changes, so git apply writes
+    // the file while no file.modified event is emitted -- an unlogged mutation,
+    // and no checkpoint id ever gets stamped for it.
     const changedFiles = names.stdout
       .split('\n')
-      .map((l) => /^-?\d+\t-?\d+\t(.+)$/.exec(l)?.[1])
+      .map((l) => /^(?:-|\d+)\t(?:-|\d+)\t(.+)$/.exec(l)?.[1])
       .filter((p): p is string => p !== undefined);
 
     for (const path of changedFiles) {

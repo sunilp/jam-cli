@@ -65,6 +65,28 @@ describe('apply_patch', () => {
     expect(!r.ok && r.error.type).toBe('invalid_input');
   });
 
+  it('emits file.modified for a binary change, which numstat reports as dashes', async () => {
+    await writeFile(join(root, 'blob.bin'), Buffer.from([0, 1, 2, 3, 0, 255]));
+    await git(['add', 'blob.bin']);
+    await git(['commit', '-qm', 'add binary']);
+    await writeFile(join(root, 'blob.bin'), Buffer.from([9, 9, 9, 0, 1]));
+    const patch = await (async (): Promise<string> => {
+      const r = await world.subprocess.run({
+        command: 'git', args: ['diff', '--binary'], cwd: root, timeoutMs: 15_000,
+      });
+      return r.stdout;
+    })();
+    await git(['checkout', '--', 'blob.bin']);
+
+    const events: string[] = [];
+    const r = await applyPatchTool.execute({ patch }, {
+      ...ctx, emit: (e) => { if (e.type === 'file.modified') events.push(e.path); },
+    });
+    expect(r.ok).toBe(true);
+    expect(r.ok && r.value.changedFiles).toEqual(['blob.bin']);
+    expect(events).toEqual(['blob.bin']);
+  });
+
   it('emits file.modified for each changed file', async () => {
     const events: string[] = [];
     await applyPatchTool.execute({ patch: GOOD }, {
