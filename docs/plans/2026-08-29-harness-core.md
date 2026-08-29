@@ -4580,6 +4580,16 @@ describe('assertNodeSupported', () => {
   });
 });
 
+describe('stop reasons', () => {
+  it('distinguishes a blown budget from a user cancellation', () => {
+    // Both leave the session resumable with no terminal event, but reporting a
+    // budget stop as CANCELLED tells the user someone pressed Ctrl-C.
+    expect(describeStop('cancelled')).toBe('cancelled by user');
+    expect(describeStop('max_turn_requests')).toBe('budget exhausted (max_turn_requests)');
+    expect(describeStop('max_tokens')).toBe('budget exhausted (max_tokens)');
+  });
+});
+
 describe('exitCodeFor', () => {
   it('maps terminal states to the documented exit codes', () => {
     expect(exitCodeFor('COMPLETED_VERIFIED')).toBe(0);
@@ -4638,6 +4648,11 @@ export function assertNodeSupported(version = process.versions.node): void {
       `still work on Node 20.`
     );
   }
+}
+
+/** Why a session stopped without finishing. Exported for testing. */
+export function describeStop(stop: StopReason): string {
+  return stop === 'cancelled' ? 'cancelled by user' : `budget exhausted (${stop})`;
 }
 
 export function exitCodeFor(state: TerminalState): number {
@@ -4704,7 +4719,7 @@ export async function runAgent(opts: AgentOptions): Promise<number> {
   process.on('SIGINT', onSigint);
 
   try {
-    await runTurn({
+    const stop = await runTurn({
       journal, artifacts, registry, world,
       policy: new DefaultPolicy(),
       approvals: new TerminalApprovalHost(),
@@ -4723,15 +4738,20 @@ export async function runAgent(opts: AgentOptions): Promise<number> {
 
     const events = journal.replay(sessionId);
     const terminal = events.map((e) => e.event).find((e) => e.type === 'session.terminal');
+
+    // No terminal event means the session was STOPPED, not finished, and stays
+    // resumable. The StopReason says which — falling back to CANCELLED for all
+    // of them reports a blown budget as if the user had hit Ctrl-C.
     const state: TerminalState = terminal?.type === 'session.terminal'
       ? terminal.state : 'CANCELLED';
+    const stoppedBecause = terminal === undefined ? describeStop(stop) : undefined;
 
     if (opts.json === true) {
       for (const e of events) {
         stdout.write(JSON.stringify({ ...e, logicalClock: e.logicalClock.toString() }) + '\n');
       }
     } else {
-      stdout.write(renderReport(events, state));
+      stdout.write(renderReport(events, state, stoppedBecause));
     }
     return exitCodeFor(state);
   } finally {
@@ -4742,7 +4762,7 @@ export async function runAgent(opts: AgentOptions): Promise<number> {
 }
 
 function renderReport(
-  events: ReturnType<Journal['replay']>, state: TerminalState
+  events: ReturnType<Journal['replay']>, state: TerminalState, stoppedBecause?: string
 ): string {
   const changed = new Set<string>();
   const lines: string[] = [];
@@ -4764,7 +4784,8 @@ function renderReport(
   }
   // Every line below comes from a VerificationResult, never from model prose.
   if (lines.length > 0) out.push('Verification:', ...lines, '');
-  out.push(state, '');
+  out.push(stoppedBecause === undefined ? state : `${state} — ${stoppedBecause}`, '');
+  out.push('  Resume with: jam agent --resume <id>', '');
   return out.join('\n');
 }
 ```
