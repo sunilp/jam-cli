@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 export interface ArtifactRef { digest: string; size: number }
 
 const ERROR_LINE = /\b(error|exception|failed|failure|panic|traceback|fatal)\b/i;
+const MAX_ERROR_LINES = 20;
 
 export class ArtifactStore {
   private readonly db: DatabaseSyncType;
@@ -34,6 +35,14 @@ export class ArtifactStore {
     return row?.body;
   }
 
+  /** Rows stored for a digest. Exists so the dedup test can assert storage. */
+  count(digest: string): number {
+    const row = this.db.prepare(
+      `SELECT COUNT(*) AS n FROM artifacts WHERE digest = ?`
+    ).get(digest) as { n: number };
+    return row.n;
+  }
+
   close(): void { this.db.close(); }
 }
 
@@ -53,12 +62,21 @@ export function preview(
   const headLines = lines.slice(0, head);
   const tailLines = lines.slice(-tail);
   const middle = lines.slice(head, lines.length - tail);
-  const errors = middle.filter((l) => ERROR_LINE.test(l)).slice(0, 20);
+  const allErrors = middle.filter((l) => ERROR_LINE.test(l));
+  const errors = allErrors.slice(0, MAX_ERROR_LINES);
+  const dropped = allErrors.length - errors.length;
 
   const parts = [
     ...headLines,
     `… ${middle.length} lines elided …`,
-    ...(errors.length ? ['--- error lines ---', ...errors] : []),
+    ...(errors.length
+      ? [
+          '--- error lines ---',
+          ...errors,
+          // Never drop error lines without saying so.
+          ...(dropped > 0 ? [`… ${dropped} more error lines omitted …`] : []),
+        ]
+      : []),
     ...tailLines,
   ];
   return parts.join('\n');

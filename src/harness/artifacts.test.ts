@@ -10,9 +10,24 @@ describe('ArtifactStore', () => {
     s.close();
   });
 
-  it('deduplicates identical content', () => {
+  it('deduplicates identical content into a single stored row', () => {
     const s = new ArtifactStore(':memory:');
-    expect(s.put('same').digest).toBe(s.put('same').digest);
+    const a = s.put('same');
+    s.put('same');
+    s.put('same');
+    expect(s.count(a.digest)).toBe(1);
+    s.close();
+  });
+
+  it('gives different content different digests', () => {
+    const s = new ArtifactStore(':memory:');
+    expect(s.put('one').digest).not.toBe(s.put('two').digest);
+    s.close();
+  });
+
+  it('returns undefined for an unknown digest rather than throwing', () => {
+    const s = new ArtifactStore(':memory:');
+    expect(s.get('0'.repeat(64))).toBeUndefined();
     s.close();
   });
 });
@@ -36,5 +51,13 @@ describe('preview', () => {
     lines[150] = 'Error: boom';
     const p = preview(lines.join('\n'), { head: 2, tail: 2 });
     expect(p).toContain('Error: boom');
+  });
+
+  it('says so when it omits error lines beyond the cap', () => {
+    const lines = Array.from({ length: 300 }, (_, i) => `line ${i}`);
+    for (let i = 100; i < 130; i++) lines[i] = `Error: boom ${i}`;
+    const p = preview(lines.join('\n'), { head: 2, tail: 2 });
+    expect(p).toContain('Error: boom 100');
+    expect(p).toContain('10 more error lines omitted');
   });
 });
