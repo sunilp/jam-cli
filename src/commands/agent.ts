@@ -52,7 +52,13 @@ export function exitCodeFor(state: TerminalState): number {
 
 /** Why a session stopped without finishing. Exported for testing. */
 export function describeStop(stop: StopReason): string {
-  return stop === 'cancelled' ? 'cancelled by user' : `budget exhausted (${stop})`;
+  if (stop === 'cancelled') return 'cancelled by user';
+  // 'deadline' is the wall-clock timeout, distinct from the tool-call cap
+  // ('max_turn_requests') — both used to render as identical text, which
+  // told a --timeout 15000 user and a --max-tool-calls 0 user the exact
+  // same "budget exhausted (max_turn_requests)".
+  if (stop === 'deadline') return 'time limit reached';
+  return `budget exhausted (${stop})`;
 }
 
 /**

@@ -162,6 +162,20 @@ describe('runTurn', () => {
     expect(await runTurn(d, s, 't', new AbortController().signal)).toBe('max_turn_requests');
   });
 
+  it('stops with deadline, not max_turn_requests, once the wall clock runs out', async () => {
+    // Same tool-call-budget shape as above, but the deadline is already past
+    // rather than the call count. Before this fix Budget.check() returned
+    // 'max_turn_requests' for both cases, so a wall-clock timeout was
+    // indistinguishable from an exhausted tool-call cap.
+    const d = await deps(
+      Array.from({ length: 10 }, () => ({
+        content: null, toolCalls: [{ id: 'x', name: 'echo', arguments: { a: 'loop' } }],
+      })), PASSING);
+    d.budget.deadlineMs = Date.now() - 1;
+    const s = d.journal.createSession({ task: 't', cwd: root, requirements: PASSING });
+    expect(await runTurn(d, s, 't', new AbortController().signal)).toBe('deadline');
+  });
+
   it('ends FAILED when the provider fails unrecoverably', async () => {
     const d = await deps([], PASSING);
     const s = d.journal.createSession({ task: 't', cwd: root, requirements: PASSING });

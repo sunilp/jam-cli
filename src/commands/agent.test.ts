@@ -78,6 +78,14 @@ describe('stop reasons', () => {
     expect(describeStop('max_turn_requests')).toBe('budget exhausted (max_turn_requests)');
     expect(describeStop('max_tokens')).toBe('budget exhausted (max_tokens)');
   });
+
+  it('distinguishes a wall-clock deadline from the tool-call cap', () => {
+    // Before this fix both Budget.check() cases returned 'max_turn_requests',
+    // so a 15s --timeout run and a --max-tool-calls 0 run printed the
+    // identical "budget exhausted (max_turn_requests)".
+    expect(describeStop('deadline')).toBe('time limit reached');
+    expect(describeStop('deadline')).not.toContain('max_turn_requests');
+  });
 });
 
 describe('runAgentCommand', () => {
