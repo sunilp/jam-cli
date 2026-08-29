@@ -1641,6 +1641,24 @@ describe('DefaultPolicy', () => {
     }
   });
 
+  it('denies case variants, since the filesystem is case-insensitive', () => {
+    // .JAM/config.yaml reaches the real .jam/config.yaml on macOS and Windows.
+    // Verified: git apply on a patch naming .JAM/ modified the tracked .jam/.
+    for (const variant of ['.JAM', '.Jam', '.jAm']) {
+      const patched = p.evaluate({
+        ...base, tool: 'apply_patch', risk: 'R1',
+        input: { patch: `--- a/${variant}/config.yaml\n+++ b/${variant}/config.yaml\n` },
+      });
+      expect(patched, variant).toMatchObject({ type: 'deny' });
+
+      const shelled = p.evaluate({
+        ...base, tool: 'run_command', risk: 'R2',
+        input: { command: 'sh', args: ['-c', `echo bad > ${variant}/config.yaml`] },
+      });
+      expect(shelled, variant).toMatchObject({ type: 'deny' });
+    }
+  });
+
   it('does not deny paths that merely start with the same letters', () => {
     const d = p.evaluate({
       ...base, tool: 'run_command', risk: 'R1',
@@ -1754,8 +1772,11 @@ export class DefaultPolicy implements PolicyEngine {
   }
 
   private touchesProtectedPath(input: unknown): boolean {
+    // Lower-cased: macOS and Windows filesystems are case-insensitive by
+    // default, so `.JAM/config.yaml` reaches the same file as `.jam/`.
+    // Without this a one-character change turns a categorical deny into allow.
     return stringsIn(input).some((s) =>
-      PROTECTED_SEGMENT.test(s.replace(/\\/g, '/'))
+      PROTECTED_SEGMENT.test(s.replace(/\\/g, '/').toLowerCase())
     );
   }
 }
