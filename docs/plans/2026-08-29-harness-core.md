@@ -76,7 +76,7 @@ src/commands/agent.ts     CLI surface
 
 ```ts
 // src/harness/ids.test.ts
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { uuidv7, LogicalClock } from './ids.js';
 
 describe('uuidv7', () => {
@@ -93,6 +93,37 @@ describe('uuidv7', () => {
   it('never collides', () => {
     const ids = Array.from({ length: 5000 }, () => uuidv7());
     expect(new Set(ids).size).toBe(5000);
+  });
+
+  it('stays ordered across a backward clock step', () => {
+    // NTP step-back / VM resume. Without clamping, the counter resets and the
+    // new id carries a smaller timestamp than the one before it.
+    const spy = vi.spyOn(Date, 'now');
+    try {
+      spy.mockReturnValue(1_787_997_427_037);
+      const first = uuidv7();
+      spy.mockReturnValue(1_787_997_426_987); // 50ms earlier
+      const second = uuidv7();
+      expect(second > first).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('stays unique and ordered past counter exhaustion in one millisecond', () => {
+    // Drive the clock so the spin-wait can terminate: hold one millisecond for
+    // the first 4096 calls, then let it advance.
+    const spy = vi.spyOn(Date, 'now');
+    try {
+      let calls = 0;
+      const base = 1_787_997_500_000;
+      spy.mockImplementation(() => base + (calls++ < 8200 ? 0 : 1));
+      const ids = Array.from({ length: 5000 }, () => uuidv7());
+      expect(new Set(ids).size).toBe(5000);
+      expect([...ids].sort()).toEqual(ids);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 
@@ -131,7 +162,10 @@ let counter = 0;
  * used anywhere in the journal — see spec section 5.1.
  */
 export function uuidv7(): string {
-  const now = Date.now();
+  // Clamped, never raw Date.now(). A backward step (NTP, VM resume) would
+  // otherwise reset the counter and stamp a SMALLER timestamp than the
+  // previous id, silently corrupting journal replay order.
+  const now = Math.max(Date.now(), lastMs);
   if (now === lastMs) {
     counter += 1;
     if (counter > 0xfff) {
