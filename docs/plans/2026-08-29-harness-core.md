@@ -643,6 +643,15 @@ describe('preview', () => {
     expect(p).toContain('Error: boom');
   });
 
+  it('bounds a single enormous line, which line counting alone cannot', () => {
+    // JSON.stringify escapes newlines, so any multi-line value becomes ONE
+    // line. Without a character ceiling the whole thing reaches the journal.
+    const oneHugeLine = JSON.stringify({ content: 'x'.repeat(200_000) });
+    const p = preview(oneHugeLine);
+    expect(p.length).toBeLessThan(10_000);
+    expect(p).toContain('more characters elided');
+  });
+
   it('says so when it omits error lines beyond the cap', () => {
     // Silent truncation of a stack trace is the failure this guards against.
     const lines = Array.from({ length: 300 }, (_, i) => `line ${i}`);
@@ -670,6 +679,9 @@ export interface ArtifactRef { digest: string; size: number }
 
 const ERROR_LINE = /\b(error|exception|failed|failure|panic|traceback|fatal)\b/i;
 const MAX_ERROR_LINES = 20;
+/** Line counting alone does not bound a single enormous line — and
+ *  JSON.stringify turns any multi-line value into exactly one. */
+const MAX_CHARS = 8_000;
 
 export class ArtifactStore {
   private readonly db: DatabaseSync;
@@ -717,12 +729,12 @@ export class ArtifactStore {
  */
 export function preview(
   content: string,
-  opts: { head?: number; tail?: number } = {}
+  opts: { head?: number; tail?: number; maxChars?: number } = {}
 ): string {
   const head = opts.head ?? 40;
   const tail = opts.tail ?? 40;
   const lines = content.split('\n');
-  if (lines.length <= head + tail) return content;
+  if (lines.length <= head + tail) return clamp(content, opts.maxChars ?? MAX_CHARS);
 
   const headLines = lines.slice(0, head);
   const tailLines = lines.slice(-tail);
@@ -745,7 +757,18 @@ export function preview(
       : []),
     ...tailLines,
   ];
-  return parts.join('\n');
+  return clamp(parts.join('\n'), opts.maxChars ?? MAX_CHARS);
+}
+
+/**
+ * Hard character ceiling. Without it a single 500KB line — which is exactly
+ * what JSON.stringify produces from any multi-line value, since it escapes
+ * newlines — sails through the line-count check untouched and lands whole in
+ * the journal and the model's context.
+ */
+function clamp(s: string, maxChars: number): string {
+  if (s.length <= maxChars) return s;
+  return `${s.slice(0, maxChars)}\n… ${s.length - maxChars} more characters elided …`;
 }
 ```
 
@@ -2985,6 +3008,45 @@ describe('dispatch', () => {
     expect(executed).toEqual(['risky']);
   });
 
+  it('bounds a huge tool result instead of putting it all in the journal', async () => {
+    // read_file can return 500KB. JSON.stringify collapses it to one line, so
+    // line-based preview alone lets the whole thing into the journal.
+    const huge: Tool<Record<string, never>, { content: string }> = {
+      name: 'huge', description: 'big', input: z.object({}), risk: 'R0', mutates: false,
+      execute: () => Promise.resolve({ ok: true, value: { content: 'x'.repeat(300_000) } }),
+    };
+    deps.registry.register(huge);
+    await dispatch(deps, sessionId, { id: '1', name: 'huge', arguments: {} },
+      new AbortController().signal);
+
+    const done = journal.replay(sessionId).at(-1)!.event as
+      { type: string; result: { preview: string; artifactDigest?: string } };
+    expect(done.result.preview.length).toBeLessThan(10_000);
+    // The full value is still retrievable, just not in the journal.
+    expect(done.result.artifactDigest).toBeDefined();
+    expect(deps.artifacts.get(done.result.artifactDigest!)!.length).toBeGreaterThan(299_000);
+  });
+
+  it('journals events a tool emitted before it threw', async () => {
+    const emitsThenThrows: Tool<Record<string, never>, null> = {
+      name: 'emits_then_throws', description: 'x', input: z.object({}),
+      risk: 'R0', mutates: true,
+      execute: (_i, c) => {
+        c.emit({ type: 'file.modified', path: 'touched.ts',
+                 ownership: 'agent', checkpointId: '' });
+        throw new Error('boom');
+      },
+    };
+    deps.registry.register(emitsThenThrows);
+    await dispatch(deps, sessionId, { id: '1', name: 'emits_then_throws', arguments: {} },
+      new AbortController().signal, 'model', 'cp-1');
+
+    const types = journal.replay(sessionId).map((e) => e.event.type);
+    // The workspace changed; losing that event would be an unlogged mutation.
+    expect(types).toContain('file.modified');
+    expect(types).toContain('tool.completed');
+  });
+
   it('reports an unknown tool as not_found', async () => {
     await dispatch(deps, sessionId, { id: '1', name: 'nope', arguments: {} },
       new AbortController().signal);
@@ -3109,15 +3171,16 @@ export async function dispatch(
   };
 
   let result;
+  let threw: unknown;
   try {
     result = await tool.execute(value, ctx);
   } catch (err) {
-    return fail(call.id, {
-      type: 'internal', recoverable: false,
-      message: err instanceof Error ? err.message : String(err),
-    }, deps, sessionId, startedAt);
+    threw = err;
   }
 
+  // Journal emitted events BEFORE handling a throw. A tool that emits
+  // file.modified and then throws has still changed the workspace, and
+  // dropping those events would leave an unlogged mutation.
   // Tools cannot know their checkpoint; the loop owns it, so stamp it here.
   for (const e of emitted) {
     deps.journal.append(
@@ -3126,14 +3189,27 @@ export async function dispatch(
     );
   }
 
+  if (threw !== undefined || result === undefined) {
+    return fail(call.id, {
+      type: 'internal', recoverable: false,
+      message: threw instanceof Error ? threw.message : String(threw),
+    }, deps, sessionId, startedAt);
+  }
+
   // (10) normalize, (13) durable event
-  const summary: ToolResultSummary = result.ok
-    ? {
-        ok: true,
-        preview: preview(JSON.stringify(result.value)),
-        artifactDigest: result.artifact?.digest,
-      }
-    : { ok: false, errorType: result.error.type, preview: result.error.message };
+  // Keep the full value retrievable even when the tool did not store one
+  // itself: read_file, list_dir and search_text return potentially huge values
+  // and have no artifact of their own.
+  let summary: ToolResultSummary;
+  if (result.ok) {
+    const serialized = JSON.stringify(result.value);
+    const artifact = result.artifact
+      ?? (serialized.length > 8_000 ? deps.artifacts.put(serialized, 'application/json') : undefined);
+    summary = { ok: true, preview: preview(serialized), artifactDigest: artifact?.digest };
+  } else {
+    summary = { ok: false, errorType: result.error.type,
+                preview: preview(result.error.message) };
+  }
 
   deps.journal.append(sessionId, {
     type: 'tool.completed', callId: call.id, result: summary,
