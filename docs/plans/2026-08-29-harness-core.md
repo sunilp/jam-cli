@@ -2494,6 +2494,30 @@ describe('apply_patch', () => {
     expect(!r.ok && r.error.type).toBe('invalid_input');
   });
 
+  it('emits file.modified for a binary change, which numstat reports as dashes', async () => {
+    // git numstat prints "-\t-\tpath" for binary files. Dropping those means a
+    // file changes on disk with nothing in the journal.
+    await writeFile(join(root, 'blob.bin'), Buffer.from([0, 1, 2, 3, 0, 255]));
+    await git(['add', 'blob.bin']);
+    await git(['commit', '-qm', 'add binary']);
+    await writeFile(join(root, 'blob.bin'), Buffer.from([9, 9, 9, 0, 1]));
+    const patch = await (async (): Promise<string> => {
+      const r = await world.subprocess.run({
+        command: 'git', args: ['diff', '--binary'], cwd: root, timeoutMs: 15_000,
+      });
+      return r.stdout;
+    })();
+    await git(['checkout', '--', 'blob.bin']);
+
+    const events: string[] = [];
+    const r = await applyPatchTool.execute({ patch }, {
+      ...ctx, emit: (e) => { if (e.type === 'file.modified') events.push(e.path); },
+    });
+    expect(r.ok).toBe(true);
+    expect(r.ok && r.value.changedFiles).toEqual(['blob.bin']);
+    expect(events).toEqual(['blob.bin']);
+  });
+
   it('emits file.modified for each changed file', async () => {
     const events: string[] = [];
     await applyPatchTool.execute({ patch: GOOD }, {
@@ -2564,9 +2588,13 @@ export const applyPatchTool: Tool<z.infer<typeof input>, { changedFiles: string[
       } };
     }
 
+    // numstat prints "3\t1\tpath" for text and "-\t-\tpath" for BINARY files.
+    // A digits-only pattern silently drops binary changes, so git apply writes
+    // the file while no file.modified event is emitted — an unlogged mutation,
+    // and no checkpoint id ever gets stamped for it.
     const changedFiles = names.stdout
       .split('\n')
-      .map((l) => /^-?\d+\t-?\d+\t(.+)$/.exec(l)?.[1])
+      .map((l) => /^(?:-|\d+)\t(?:-|\d+)\t(.+)$/.exec(l)?.[1])
       .filter((p): p is string => p !== undefined);
 
     for (const path of changedFiles) {
