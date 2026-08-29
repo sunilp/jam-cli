@@ -19,11 +19,16 @@ describe('MockProvider', () => {
   it('sends deltas to telemetry, not to the caller', async () => {
     const t = new RingTelemetry();
     const p = new MockProvider([{ content: 'hi', toolCalls: [], deltas: ['h', 'i'] }], t);
-    await p.generate({ messages: [], tools: [] }, new AbortController().signal);
+    const res = await p.generate({ messages: [], tools: [] }, new AbortController().signal);
+
     expect(t.recent()).toEqual([
       { kind: 'model.delta', text: 'h' },
       { kind: 'model.delta', text: 'i' },
     ]);
+    // Without this the test passes against an implementation that ALSO leaks
+    // the deltas into the returned content, which would put streamed tokens
+    // into the durable journal — the thing the telemetry split exists to stop.
+    expect(res.content).toBe('hi');
   });
 
   it('reports exhaustion as unrecoverable rather than looping forever', async () => {
