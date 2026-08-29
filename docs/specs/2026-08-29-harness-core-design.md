@@ -31,7 +31,7 @@ authority boundary, not the loop.
 |---|---|
 | Model provider interface and adapters | `src/providers/` — anthropic, openai, ollama, groq, copilot, embedded; streaming, tool calls, capabilities |
 | Six built-in tools | `archive/ai-suite`: `read_file`, `list_dir`, `search_text`, `apply_patch`, `run_command`, `git_diff`, with tests |
-| SQLite | `better-sqlite3`, already a dependency |
+| SQLite | `node:sqlite` (`DatabaseSync`), built in — see 14.1 |
 | Terminal rendering | `src/ui/`, `ink` |
 
 `src/trace/` (tree-sitter extractors, repo graph, impact analysis) is **not**
@@ -573,7 +573,25 @@ Flags: `--provider`, `--model`, `--verify <cmd>` (repeatable), `--json`,
 
 ## 14. Persistence
 
-`~/.jam/harness.db`, SQLite via `better-sqlite3`.
+`~/.jam/harness.db`, SQLite via the built-in `node:sqlite` (`DatabaseSync`).
+
+### 14.1 Why not better-sqlite3
+
+`src/trace/` uses `better-sqlite3`, and the original intent was to reuse it.
+It is unusable here: its native binding is compiled per Node ABI, the checked-in
+build targets NODE_MODULE_VERSION 115 (Node 20), and rebuilding needs network
+access to fetch headers. On a Node 26 machine every `new Database()` throws
+`ERR_DLOPEN_FAILED`.
+
+`node:sqlite` is built into Node, needs no compilation, and exposes the same
+synchronous shape (`prepare().run/get/all`, `exec`, `close`). One difference
+matters: there is no `db.pragma()`, so pragmas are issued via `db.exec()`.
+
+Cost: `jam agent` requires Node 22.5+, while the package keeps
+`engines: >=20` so existing `jam trace` users on Node 20 are unaffected. The
+agent command fails fast with a clear message on older runtimes rather than
+crashing on import. Revisit if `better-sqlite3` ships reliable prebuilds for
+every supported ABI.
 
 ```sql
 CREATE TABLE sessions (

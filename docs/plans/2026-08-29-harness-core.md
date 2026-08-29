@@ -6,13 +6,16 @@
 
 **Architecture:** A new `src/harness/` tree inside the existing jam-cli package. Every model-proposed action passes through one dispatch pipeline (validate → canonicalize → classify risk → policy → approve → execute → record). Durable session history is an append-only SQLite journal of semantic events; streamed tokens and subprocess chunks go to a separate disposable telemetry stream. Authority (policy, approval, journal writes) is not pluggable; everything else is behind an interface.
 
-**Tech Stack:** TypeScript (ESM, NodeNext), Node >= 20, vitest, zod ^3.23.8, better-sqlite3 ^12.8.0, commander ^12.1.0. No new runtime dependencies.
+**Tech Stack:** TypeScript (ESM, NodeNext), vitest, zod ^3.23.8, commander ^12.1.0, and the built-in `node:sqlite`. No new runtime dependencies. The harness requires Node 22.5+; the package keeps `engines: >=20` for existing commands.
 
 **Spec:** [`docs/specs/2026-08-29-harness-core-design.md`](../specs/2026-08-29-harness-core-design.md)
 
 ## Global Constraints
 
-- **No new runtime dependencies.** `zod` and `better-sqlite3` are already present. UUIDv7 is implemented locally (Task 1), not pulled from `uuid`.
+- **No new runtime dependencies.** `zod` is already present; SQLite comes from the built-in `node:sqlite`. UUIDv7 is implemented locally (Task 1), not pulled from `uuid`.
+- **Storage is `node:sqlite` (`DatabaseSync`), never `better-sqlite3`.** Its native binding cannot load on this machine (built for Node 20 ABI 115; running Node 26 needs 147) and cannot be rebuilt offline. `node:sqlite` has **no `db.pragma()`** — issue pragmas with `db.exec('PRAGMA ...')`.
+- **`@types/node` is 20.x and does not declare `node:sqlite`.** Task 2 adds `src/types/node-sqlite.d.ts`; do not attempt to upgrade `@types/node` (no network).
+- **Pre-existing baseline failure, not yours.** `npm test` on a clean checkout fails 30 tests across `src/trace/*` and `trace-smoke` because those still use `better-sqlite3`. Do not try to fix them. Judge your task only by the tests it adds and the rest of the previously-passing suite.
 - **ESM only.** All relative imports end in `.js` (e.g. `import { x } from './ids.js'`), matching `"type": "module"` and the existing `src/` convention.
 - **Tests are colocated**: `src/harness/foo.ts` is tested by `src/harness/foo.test.ts`. `vitest.config.ts` includes `src/**/*.test.ts`.
 - **Tools never throw for expected failure.** They return `{ ok: false, error: StructuredError }`. Throwing is reserved for programmer error.
@@ -324,11 +327,43 @@ export interface JournalEvent {
 }
 ```
 
-- [ ] **Step 4: Write the journal**
+- [ ] **Step 4: Declare the node:sqlite types**
+
+`@types/node` is 20.x and predates `node:sqlite`, so without this `npm run
+typecheck` fails on the import. Only the surface the harness uses is declared.
+Delete this file once `@types/node` is bumped past 22.5.
+
+```ts
+// src/types/node-sqlite.d.ts
+declare module 'node:sqlite' {
+  export interface StatementResultingChanges {
+    changes: number | bigint;
+    lastInsertRowid: number | bigint;
+  }
+
+  export class StatementSync {
+    run(...params: unknown[]): StatementResultingChanges;
+    get(...params: unknown[]): unknown;
+    all(...params: unknown[]): unknown[];
+  }
+
+  export class DatabaseSync {
+    constructor(path: string, options?: { open?: boolean; readOnly?: boolean });
+    exec(sql: string): void;
+    prepare(sql: string): StatementSync;
+    close(): void;
+  }
+}
+```
+
+Confirm `tsconfig.json`'s `include` covers `src/**/*.d.ts`. If it only lists
+`src/**/*.ts`, add the pattern rather than moving the file.
+
+- [ ] **Step 5: Write the journal**
 
 ```ts
 // src/harness/journal.ts
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 import { uuidv7, LogicalClock } from './ids.js';
 import type { JournalEvent, RuntimeEvent, Requirement, TerminalState } from './events.js';
 
@@ -338,12 +373,12 @@ export interface SessionRow {
 }
 
 export class Journal {
-  private readonly db: Database.Database;
+  private readonly db: DatabaseSync;
   private readonly clocks = new Map<string, LogicalClock>();
 
   constructor(path: string) {
-    this.db = new Database(path);
-    this.db.pragma('journal_mode = WAL');
+    this.db = new DatabaseSync(path);
+    this.db.exec('PRAGMA journal_mode = WAL');  // node:sqlite has no db.pragma()
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY, cwd TEXT NOT NULL, task TEXT NOT NULL,
@@ -450,16 +485,17 @@ export class Journal {
 }
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [ ] **Step 6: Run tests to verify they pass**
 
-Run: `npx vitest run src/harness/journal.test.ts`
-Expected: PASS, 5 tests
+Run: `npx vitest run src/harness/journal.test.ts && npm run typecheck`
+Expected: PASS, 5 tests; typecheck clean
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src/harness/events.ts src/harness/journal.ts src/harness/journal.test.ts
-git commit -m "feat(harness): semantic event journal on sqlite"
+git add src/harness/events.ts src/harness/journal.ts src/harness/journal.test.ts \
+        src/types/node-sqlite.d.ts
+git commit -m "feat(harness): semantic event journal on node:sqlite"
 ```
 
 ---
@@ -531,7 +567,7 @@ Expected: FAIL — cannot resolve `./artifacts.js`
 
 ```ts
 // src/harness/artifacts.ts
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
 
 export interface ArtifactRef { digest: string; size: number }
@@ -539,10 +575,10 @@ export interface ArtifactRef { digest: string; size: number }
 const ERROR_LINE = /\b(error|exception|failed|failure|panic|traceback|fatal)\b/i;
 
 export class ArtifactStore {
-  private readonly db: Database.Database;
+  private readonly db: DatabaseSync;
 
   constructor(path: string) {
-    this.db = new Database(path);
+    this.db = new DatabaseSync(path);
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS artifacts (
         digest TEXT PRIMARY KEY, size INTEGER NOT NULL,
@@ -1039,6 +1075,7 @@ const noop: Tool<{ a: string }, string> = {
   description: 'does nothing',
   input: z.object({ a: z.string() }),
   risk: 'R0',
+  mutates: false,
   execute: async (i) => ({ ok: true, value: i.a }),
 };
 
@@ -1119,6 +1156,12 @@ export interface Tool<I = unknown, O = unknown> {
   readonly input: z.ZodType<I>;
   /** A function for run_command, whose risk depends on the command itself. */
   readonly risk: RiskLevel | ((input: I) => RiskLevel);
+  /**
+   * True if this tool can change the workspace. The loop checkpoints before a
+   * batch containing any such tool. run_command is true conservatively: an
+   * arbitrary command can write files.
+   */
+  readonly mutates: boolean;
   execute(input: I, ctx: ToolContext): Promise<ToolResult<O>>;
 }
 
@@ -1603,6 +1646,7 @@ export const readFileTool: Tool<z.infer<typeof input>, { content: string; trunca
   description: 'Read a file, optionally limited to a line range.',
   input,
   risk: 'R0',
+  mutates: false,
   async execute(args, ctx) {
     let abs: string;
     try {
@@ -1656,6 +1700,7 @@ export const listDirTool: Tool<z.infer<typeof input>, { entries: DirEntry[] }> =
   description: 'List the entries of a directory.',
   input,
   risk: 'R0',
+  mutates: false,
   async execute(args, ctx) {
     let abs: string;
     try {
@@ -1699,6 +1744,7 @@ export const searchTextTool: Tool<z.infer<typeof input>, { matches: Match[] }> =
   description: 'Search the workspace for text. Prefer this over reading files speculatively.',
   input,
   risk: 'R0',
+  mutates: false,
   async execute(args, ctx) {
     const max = args.maxResults ?? 100;
     const argv = ['--line-number', '--no-heading', '--color=never', '--max-count', String(max)];
@@ -1751,6 +1797,7 @@ export const gitDiffTool: Tool<z.infer<typeof input>, { diff: string }> = {
   description: 'Show the current diff of the workspace.',
   input,
   risk: 'R0',
+  mutates: false,
   async execute(args, ctx) {
     const argv = ['diff'];
     if (args.staged === true) argv.push('--staged');
@@ -2035,6 +2082,7 @@ export const applyPatchTool: Tool<z.infer<typeof input>, { changedFiles: string[
     'The patch is validated before anything is written.',
   input,
   risk: 'R1',
+  mutates: true,
   async execute(args, ctx) {
     if (args.patch.trim() === '') {
       return { ok: false, error: {
@@ -2252,6 +2300,7 @@ export const runCommandTool: Tool<
   description: 'Run a command in the workspace. Provide the executable and arguments separately.',
   input,
   risk: (i) => classifyRisk(i.command, i.args ?? []),
+  mutates: true,
   async execute(args, ctx) {
     const r = await ctx.world.subprocess.run({
       command: args.command,
@@ -2332,17 +2381,17 @@ let sessionId: string;
 let executed: string[];
 
 const okTool: Tool<{ a: string }, { echoed: string }> = {
-  name: 'ok', description: 'echo', input: z.object({ a: z.string() }), risk: 'R0',
+  name: 'ok', description: 'echo', input: z.object({ a: z.string() }), risk: 'R0', mutates: false,
   execute: async (i) => { executed.push('ok'); return { ok: true, value: { echoed: i.a } }; },
 };
 
 const riskyTool: Tool<Record<string, never>, null> = {
-  name: 'risky', description: 'risky', input: z.object({}), risk: 'R3',
+  name: 'risky', description: 'risky', input: z.object({}), risk: 'R3', mutates: false,
   execute: async () => { executed.push('risky'); return { ok: true, value: null }; },
 };
 
 const forbiddenTool: Tool<Record<string, never>, null> = {
-  name: 'forbidden', description: 'forbidden', input: z.object({}), risk: 'R4',
+  name: 'forbidden', description: 'forbidden', input: z.object({}), risk: 'R4', mutates: false,
   execute: async () => { executed.push('forbidden'); return { ok: true, value: null }; },
 };
 
@@ -2467,7 +2516,9 @@ export async function dispatch(
   sessionId: string,
   call: ToolCall,
   signal: AbortSignal,
-  provenance: Provenance = 'model'
+  provenance: Provenance = 'model',
+  /** Checkpoint covering this batch, created by the loop. '' when none. */
+  checkpointId = ''
 ): Promise<void> {
   const startedAt = Date.now();
   const tool = deps.registry.get(call.name);
@@ -2537,7 +2588,13 @@ export async function dispatch(
     }, deps, sessionId, startedAt);
   }
 
-  for (const e of emitted) deps.journal.append(sessionId, e);
+  // Tools cannot know their checkpoint; the loop owns it, so stamp it here.
+  for (const e of emitted) {
+    deps.journal.append(
+      sessionId,
+      e.type === 'file.modified' ? { ...e, checkpointId } : e
+    );
+  }
 
   // (10) normalize, (13) durable event
   const summary: ToolResultSummary = result.ok
@@ -2975,12 +3032,24 @@ describe('Verifier', () => {
     expect(artifacts.get(r.artifactDigest)).toContain('42');
   });
 
+  it('runs quoted commands through a shell so a failing check really fails', async () => {
+    // Whitespace splitting would make node evaluate the string literal
+    // "process.exit(1)" and exit 0 — a failing check reporting success.
+    const v = new Verifier(world, root, artifacts, [
+      { command: 'node -e "process.exit(1)"', mustExit: 0 },
+    ], 3);
+    const r = (await v.evaluate(0)).results[0]!;
+    expect(r.exitCode).toBe(1);
+    expect(r.passed).toBe(false);
+  });
+
   it('marks a requirement that cannot be executed as not runnable', async () => {
     const v = new Verifier(world, root, artifacts, [
       { command: 'definitely-not-a-real-binary-xyz', mustExit: 0 },
     ], 3);
     const verdict = await v.evaluate(0);
     expect(verdict.runnable).toBe(false);
+    expect(verdict.results[0]!.passed).toBe(false);
   });
 });
 ```
@@ -3037,9 +3106,10 @@ export class Verifier {
       }
       if (req.command === undefined) continue;
 
-      const [exe, ...args] = req.command.split(/\s+/);
-      const r = await this.run(req.command, exe!, args, req.mustExit ?? 0);
-      if (r.exitCode === -1) executable = false;
+      const [exe, args] = shellInvocation(req.command);
+      const r = await this.run(req.command, exe, args, req.mustExit ?? 0);
+      // -1 is spawn failure; 127 is the shell's "command not found".
+      if (r.exitCode === -1 || r.exitCode === 127) executable = false;
       results.push(r);
     }
 
@@ -3069,6 +3139,25 @@ export class Verifier {
       artifactDigest: artifact.digest,
     };
   }
+}
+
+/**
+ * Verification commands run through a shell, unlike run_command.
+ *
+ * They come from the user's own .jam/config.yaml (provenance 'declared'), not
+ * from the model, and users write `npm test -- --run`, quoted arguments and
+ * pipelines. Splitting on whitespace silently corrupts those: `node -e
+ * "process.exit(1)"` becomes ['node','-e','"process.exit(1)"'], which makes
+ * node evaluate a string literal and exit 0 — a failing check that reports
+ * success, which is the exact failure this whole subsystem exists to prevent.
+ *
+ * The model cannot reach this path: it cannot modify .jam/ (DefaultPolicy) and
+ * the requirements are snapshotted at session start.
+ */
+export function shellInvocation(command: string): [string, string[]] {
+  return process.platform === 'win32'
+    ? ['cmd.exe', ['/d', '/s', '/c', command]]
+    : ['/bin/sh', ['-c', command]];
 }
 
 /** Read once, at session start. The snapshot then governs the whole session. */
@@ -3141,7 +3230,7 @@ let root: string;
 let journal: Journal;
 
 const echo: Tool<{ a: string }, { echoed: string }> = {
-  name: 'echo', description: 'echo', input: z.object({ a: z.string() }), risk: 'R0',
+  name: 'echo', description: 'echo', input: z.object({ a: z.string() }), risk: 'R0', mutates: false,
   execute: async (i) => ({ ok: true, value: { echoed: i.a } }),
 };
 
@@ -3303,12 +3392,15 @@ import type { ModelProvider } from './model.js';
 import type { Verifier } from './verify.js';
 import type { BudgetLimits } from './session.js';
 import type { TerminalState } from './events.js';
+import type { CheckpointStore } from './checkpoint.js';
 
 export interface LoopDeps extends DispatchDeps {
   provider: ModelProvider;
   context: ContextProvider;
   verifier: Verifier;
   budget: BudgetLimits;
+  /** Optional: without it the run is simply not reversible. */
+  checkpoints?: CheckpointStore;
 }
 
 function finish(deps: LoopDeps, sessionId: string, state: TerminalState): void {
@@ -3388,10 +3480,25 @@ export async function runTurn(
       continue; // failures are now in the context; the model gets another turn
     }
 
+    // One checkpoint per mutating batch, so every edit is reversible (spec 12).
+    let checkpointId = '';
+    const mutating = res.toolCalls.some((c) => deps.registry.get(c.name)?.mutates === true);
+    if (mutating && deps.checkpoints !== undefined) {
+      try {
+        const cp = await deps.checkpoints.create(`turn ${round}`);
+        checkpointId = cp.id;
+        deps.journal.append(sessionId, {
+          type: 'checkpoint.created', checkpointId: cp.id, ref: cp.ref,
+        });
+      } catch {
+        // A repo without git still runs; it just cannot roll back.
+      }
+    }
+
     for (const call of res.toolCalls) {
       if (signal.aborted) return 'cancelled';
       budget.countToolCall();
-      await dispatch(deps, sessionId, call, signal);
+      await dispatch(deps, sessionId, call, signal, 'model', checkpointId);
     }
   }
 }
@@ -3434,7 +3541,19 @@ git commit -m "feat(harness): agent loop with verifier-gated completion"
 ```ts
 // src/commands/agent.test.ts
 import { describe, it, expect } from 'vitest';
-import { exitCodeFor } from './agent.js';
+import { exitCodeFor, assertNodeSupported } from './agent.js';
+
+describe('assertNodeSupported', () => {
+  it('accepts Node 22.5 and newer', () => {
+    expect(() => assertNodeSupported('22.5.0')).not.toThrow();
+    expect(() => assertNodeSupported('26.7.0')).not.toThrow();
+  });
+
+  it('rejects older runtimes with an actionable message', () => {
+    expect(() => assertNodeSupported('20.19.0')).toThrow(/requires Node 22\.5/);
+    expect(() => assertNodeSupported('22.4.0')).toThrow(/requires Node 22\.5/);
+  });
+});
 
 describe('exitCodeFor', () => {
   it('maps terminal states to the documented exit codes', () => {
@@ -3470,6 +3589,7 @@ import { RingTelemetry } from '../harness/telemetry.js';
 import { NaiveContext } from '../harness/context.js';
 import { Verifier, loadRequirements } from '../harness/verify.js';
 import { runTurn } from '../harness/loop.js';
+import { CheckpointStore } from '../harness/checkpoint.js';
 import { readFileTool } from '../harness/tools/read_file.js';
 import { listDirTool } from '../harness/tools/list_dir.js';
 import { searchTextTool } from '../harness/tools/search_text.js';
@@ -3478,6 +3598,22 @@ import { applyPatchTool } from '../harness/tools/apply_patch.js';
 import { runCommandTool } from '../harness/tools/run_command.js';
 import type { ModelProvider } from '../harness/model.js';
 import type { TerminalState, Requirement } from '../harness/events.js';
+
+/**
+ * The harness stores its journal in node:sqlite, added in Node 22.5. The rest
+ * of jam still supports Node 20, so fail fast here with something actionable
+ * rather than letting an import crash.
+ */
+export function assertNodeSupported(version = process.versions.node): void {
+  const [major = 0, minor = 0] = version.split('.').map(Number);
+  if (major < 22 || (major === 22 && minor < 5)) {
+    throw new Error(
+      `jam agent requires Node 22.5 or newer (found ${version}), because it stores ` +
+      `session history using the built-in node:sqlite module. Other jam commands ` +
+      `still work on Node 20.`
+    );
+  }
+}
 
 export function exitCodeFor(state: TerminalState): number {
   switch (state) {
@@ -3518,6 +3654,7 @@ export function buildRegistry(): ToolRegistry {
 }
 
 export async function runAgent(opts: AgentOptions): Promise<number> {
+  assertNodeSupported();
   const world = new LocalExecutionWorld();
   const loaded = await loadRequirements(world, opts.cwd);
   const requirements: Requirement[] = [
@@ -3551,6 +3688,7 @@ export async function runAgent(opts: AgentOptions): Promise<number> {
       provider: opts.provider,
       context: new NaiveContext(journal, registry),
       verifier: new Verifier(world, opts.cwd, artifacts, requirements, loaded.maxRetries),
+      checkpoints: new CheckpointStore(world, opts.cwd),
       budget: {
         maxToolCalls: opts.maxToolCalls ?? 200,
         maxTokens: opts.maxTokens ?? 2_000_000,
@@ -3987,6 +4125,7 @@ import { NaiveContext } from './context.js';
 import { MockProvider } from './model.js';
 import { Verifier } from './verify.js';
 import { buildRegistry } from '../commands/agent.js';
+import { CheckpointStore } from './checkpoint.js';
 import type { Requirement } from './events.js';
 
 const world = new LocalExecutionWorld();
@@ -4058,6 +4197,7 @@ describe('vertical slice', () => {
       provider,
       context: new NaiveContext(journal, registry),
       verifier: new Verifier(world, root, artifacts, requirements, 2),
+      checkpoints: new CheckpointStore(world, root),
       budget: { maxToolCalls: 50, maxTokens: 1_000_000, deadlineMs: Date.now() + 120_000 },
     };
 
@@ -4077,6 +4217,14 @@ describe('vertical slice', () => {
     expect(verification).toMatchObject({
       results: [{ requirement: 'node test.js', exitCode: 0, passed: true }],
     });
+
+    // The edit is reversible: a checkpoint covered the mutating batch and the
+    // file.modified event points at it (spec 12, and 4.6 recoverability).
+    const created = events.find((e) => e.type === 'checkpoint.created');
+    expect(created).toBeDefined();
+    const modified = events.find((e) => e.type === 'file.modified');
+    expect(modified).toMatchObject({ path: 'src/user.js', ownership: 'agent' });
+    expect((modified as { checkpointId: string }).checkpointId).not.toBe('');
 
     journal.close();
     artifacts.close();
