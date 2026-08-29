@@ -446,6 +446,49 @@ describe('runAgent', () => {
     expect(check.exitCode).not.toBe(0);
   });
 
+  it('prints the changed-files list before the verdict, for every outcome ' +
+     '-- not just buried below it', async () => {
+    const world = new LocalExecutionWorld();
+    const git = async (args: string[]): Promise<{ stdout: string; exitCode: number }> => {
+      const r = await world.subprocess.run({ command: 'git', args, cwd, timeoutMs: 15_000 });
+      if (r.exitCode !== 0) throw new Error(`git ${args.join(' ')} failed: ${r.stderr}`);
+      return r;
+    };
+
+    await git(['init', '-q']);
+    await git(['config', 'user.email', 't@example.com']);
+    await git(['config', 'user.name', 'T']);
+    await writeFile(join(cwd, 'a.txt'), 'original\n');
+    await git(['add', '.']);
+    await git(['commit', '-qm', 'init']);
+    await writeFile(join(cwd, 'a.txt'), 'modified\n');
+    const diff = await git(['diff']);
+    await git(['checkout', '--', 'a.txt']);
+
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const code = await runAgent({
+      task: 'do the thing',
+      cwd,
+      provider: new MockProvider([
+        { content: null, toolCalls: [
+          { id: '1', name: 'apply_patch', arguments: { patch: diff.stdout } },
+        ] },
+        { content: 'done', toolCalls: [] },
+      ]),
+      extraVerify: ['true'],
+      dbPath: ':memory:',
+    });
+
+    expect(code).toBe(0); // COMPLETED_VERIFIED
+    const written = stdout.mock.calls.map((c) => String(c[0])).join('');
+    expect(written).toContain('Changed:');
+    expect(written).toContain('a.txt');
+    expect(written).toContain('COMPLETED_VERIFIED');
+    // Someone reading top-to-bottom must see what changed before the verdict,
+    // not have to scroll past the verdict to find it.
+    expect(written.indexOf('Changed:')).toBeLessThan(written.indexOf('COMPLETED_VERIFIED'));
+  });
+
   it('fails fast with a clear message when .jam/config.yaml is malformed, ' +
      'without opening a session', async () => {
     await mkdir(join(cwd, '.jam'), { recursive: true });
