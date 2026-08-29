@@ -125,6 +125,23 @@ describe('runTurn', () => {
     });
   });
 
+  it('cannot reach COMPLETED_VERIFIED by cancelling mid-verification', async () => {
+    const two = [
+      { command: 'node -e "process.exit(0)"', mustExit: 0 },
+      { command: 'node -e "process.exit(0)"', mustExit: 0 },
+    ];
+    const d = await deps([{ content: 'done', toolCalls: [] }], two);
+    const ac = new AbortController();
+    const realEvaluate = d.verifier.evaluate.bind(d.verifier);
+    d.verifier.evaluate = (round, signal) => { ac.abort(); return realEvaluate(round, signal); };
+    const s = d.journal.createSession({ task: 't', cwd: root, requirements: two });
+
+    const stop = await runTurn(d, s, 't', ac.signal);
+    expect(stop).toBe('cancelled');
+    const types = d.journal.replay(s).map((e) => e.event.type);
+    expect(types).not.toContain('session.terminal');
+  });
+
   it('returns cancelled on abort and leaves the session resumable', async () => {
     const d = await deps([{ content: 'done', toolCalls: [] }], PASSING);
     const s = d.journal.createSession({ task: 't', cwd: root, requirements: PASSING });

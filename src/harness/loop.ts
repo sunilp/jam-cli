@@ -114,6 +114,9 @@ async function turn(
     if (res.toolCalls.length === 0) {
       // The model wants to stop. It does not get to decide that.
       const verdict = await deps.verifier.evaluate(round, signal);
+      // A cancelled session gets no terminal state at all. Belt to the
+      // verifier's braces: never record an outcome for work that was stopped.
+      if (signal.aborted) return 'cancelled';
       deps.journal.append(sessionId, {
         type: 'verification.completed', results: verdict.results,
       });

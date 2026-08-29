@@ -75,6 +75,20 @@ describe('Verifier', () => {
     expect(verdict.exhausted).toBe(false);
   });
 
+  it('never reports satisfied when verification was cut short', async () => {
+    const v = new Verifier(world, root, artifacts, [
+      { command: 'node -e "process.exit(0)"', mustExit: 0 },
+      { command: 'node -e "process.exit(0)"', mustExit: 0 },
+    ], 3);
+    const ac = new AbortController();
+    ac.abort();
+    const verdict = await v.evaluate(0, ac.signal);
+
+    expect(verdict.results.length).toBeLessThan(2);
+    expect(verdict.satisfied).toBe(false);
+    expect(verdict.runnable).toBe(false);
+  });
+
   it('is exhausted once the retry budget is spent', async () => {
     const v = new Verifier(world, root, artifacts, [
       { command: 'node -e "process.exit(1)"', mustExit: 0 },

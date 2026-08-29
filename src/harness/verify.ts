@@ -58,9 +58,14 @@ export class Verifier {
       results.push(result);
     }
 
-    const satisfied = executable && results.length > 0 && results.every((r) => r.passed);
+    // Every declared requirement must have RUN. Cancelling between two
+    // requirements otherwise leaves a partial results array whose entries all
+    // passed, and satisfied would be true — reaching COMPLETED_VERIFIED by
+    // aborting at the right moment, with requirements never checked.
+    const complete = results.length === this.requirements.length;
+    const satisfied = executable && complete && results.length > 0 && results.every((r) => r.passed);
     return {
-      runnable: executable && results.length > 0,
+      runnable: executable && complete && results.length > 0,
       satisfied,
       exhausted: round >= this.maxRetries,
       results,
