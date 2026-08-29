@@ -9,6 +9,12 @@ export interface Requirement {
   command?: string;
   mustExit?: number;
   gitDiffCheck?: boolean;
+  /**
+   * Per-command cap, default 600_000. Without an override the only ceiling is
+   * 10 minutes per command with no cross-round caching, so three requirements
+   * over four retry rounds can run for an hour with nothing able to stop it.
+   */
+  timeoutMs?: number;
 }
 
 export interface ToolCall { id: string; name: string; arguments: Record<string, unknown> }

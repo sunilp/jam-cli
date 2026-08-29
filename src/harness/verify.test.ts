@@ -104,17 +104,27 @@ describe('Verifier', () => {
 
   it('distinguishes a timed-out check from one that could not start', async () => {
     const slow = new Verifier(world, root, artifacts, [
-      { command: 'node -e "setTimeout(()=>{},60000)"', mustExit: 0 },
+      { command: 'node -e "setTimeout(()=>{},60000)"', mustExit: 0, timeoutMs: 500 },
     ], 3);
     const timedOut = await slow.evaluate(0);
     expect(timedOut.runnable).toBe(true);      // it ran; it just failed
     expect(timedOut.satisfied).toBe(false);
+    expect(timedOut.results[0]!.passed).toBe(false);
 
     const missing = new Verifier(world, root, artifacts, [
       { command: 'definitely-not-a-real-binary-xyz', mustExit: 0 },
     ], 3);
     expect((await missing.evaluate(0)).runnable).toBe(false);
-  }, 30_000);
+  }, 20_000);
+
+  it('honours a per-requirement timeout instead of the 10 minute default', async () => {
+    const started = Date.now();
+    const v = new Verifier(world, root, artifacts, [
+      { command: 'node -e "setTimeout(()=>{},60000)"', mustExit: 0, timeoutMs: 400 },
+    ], 3);
+    await v.evaluate(0);
+    expect(Date.now() - started).toBeLessThan(5_000);
+  }, 20_000);
 
   it('requires EVERY declared requirement to pass, not just one', async () => {
     const v = new Verifier(world, root, artifacts, [

@@ -36,14 +36,18 @@ export class Verifier {
 
     for (const req of this.requirements) {
       if (req.gitDiffCheck === true) {
-        const { result } = await this.run('git diff --check', 'git', ['diff', '--check'], 0);
+        const { result } = await this.run(
+          'git diff --check', 'git', ['diff', '--check'], 0, req.timeoutMs
+        );
         results.push(result);
         continue;
       }
       if (req.command === undefined) continue;
 
       const [exe, args] = shellInvocation(req.command);
-      const { result, spawnFailed } = await this.run(req.command, exe, args, req.mustExit ?? 0);
+      const { result, spawnFailed } = await this.run(
+        req.command, exe, args, req.mustExit ?? 0, req.timeoutMs
+      );
       // spawnFailed, not exitCode -1: a killed process also reports -1, and
       // treating a timed-out check as "not executable" would report
       // COMPLETED_UNVERIFIED instead of COMPLETED_PARTIAL.
@@ -61,10 +65,10 @@ export class Verifier {
   }
 
   private async run(
-    label: string, exe: string, args: string[], mustExit: number
+    label: string, exe: string, args: string[], mustExit: number, timeoutMs = 600_000
   ): Promise<{ result: VerificationResult; spawnFailed: boolean }> {
     const r = await this.world.subprocess.run({
-      command: exe, args, cwd: this.root, timeoutMs: 600_000,
+      command: exe, args, cwd: this.root, timeoutMs,
     });
     const combined = r.stderr === '' ? r.stdout : `${r.stdout}\n--- stderr ---\n${r.stderr}`;
     const artifact = this.artifacts.put(combined);
