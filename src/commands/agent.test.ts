@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { exitCodeFor, assertNodeSupported, runAgent, runAgentCommand } from './agent.js';
+import { exitCodeFor, assertNodeSupported, describeStop, runAgent, runAgentCommand } from './agent.js';
 import { MockProvider } from '../harness/model.js';
 
 describe('assertNodeSupported', () => {
@@ -24,6 +24,14 @@ describe('exitCodeFor', () => {
     expect(exitCodeFor('FAILED')).toBe(1);
     expect(exitCodeFor('COMPLETED_UNVERIFIED')).toBe(3);
     expect(exitCodeFor('CANCELLED')).toBe(4);
+  });
+});
+
+describe('stop reasons', () => {
+  it('distinguishes a blown budget from a user cancellation', () => {
+    expect(describeStop('cancelled')).toBe('cancelled by user');
+    expect(describeStop('max_turn_requests')).toBe('budget exhausted (max_turn_requests)');
+    expect(describeStop('max_tokens')).toBe('budget exhausted (max_tokens)');
   });
 });
 
@@ -122,6 +130,47 @@ describe('runAgent', () => {
     expect(written).toContain('Verification:');
     expect(written).toContain('✓ true');
     expect(written).toContain('COMPLETED_VERIFIED');
+  });
+
+  it('reports a blown tool-call budget as budget exhaustion, not a user ' +
+     'cancellation, and still exits 4', async () => {
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    // One scripted turn that calls a real, non-mutating, auto-allowed tool
+    // (list_dir, risk R0) is enough: the loop counts the call, dispatches it,
+    // then re-checks the budget at the top of its next iteration — with
+    // maxToolCalls: 1 that check trips before a second model turn is ever
+    // requested, so the script never needs to "keep calling tools" itself.
+    const code = await runAgent({
+      task: 'do the thing',
+      cwd,
+      provider: new MockProvider([
+        { content: null, toolCalls: [{ id: '1', name: 'list_dir', arguments: { path: '.' } }] },
+      ]),
+      maxToolCalls: 1,
+      dbPath: ':memory:',
+    });
+
+    // Per harness/loop.ts, a budget-exhausted turn writes no terminal event —
+    // the same gap real cancellation leaves, because both must stay
+    // resumable. exitCodeFor has no state for "budget exhausted" (only the
+    // known TerminalState values), so runAgent's fallback still maps this to
+    // CANCELLED's exit code, 4 — that part is unchanged and is not something
+    // this fix touches.
+    expect(code).toBe(4);
+
+    const written = stdout.mock.calls.map((c) => String(c[0])).join('');
+    // The behavior that actually matters: the human-readable report must say
+    // *why* the run stopped, not just that it did.
+    expect(written).toContain('budget exhausted (max_turn_requests)');
+    expect(written).toContain('Resume with: jam agent --resume');
+    // NOTE: the report line is literally `${state} — ${stoppedBecause}`, and
+    // `state` itself is still the fallback literal 'CANCELLED' (unchanged, as
+    // above) — so the line reads "CANCELLED — budget exhausted
+    // (max_turn_requests)", not a CANCELLED-free string. This assertion
+    // checks for the qualified form rather than asserting the bare word
+    // 'CANCELLED' is absent, since it is not: it is still the state prefix.
+    expect(written).toContain('CANCELLED — budget exhausted (max_turn_requests)');
   });
 
   it('fails fast with a clear message when .jam/config.yaml is malformed, ' +

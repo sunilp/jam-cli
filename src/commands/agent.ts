@@ -21,6 +21,7 @@ import { gitDiffTool } from '../harness/tools/git_diff.js';
 import { applyPatchTool } from '../harness/tools/apply_patch.js';
 import { runCommandTool } from '../harness/tools/run_command.js';
 import type { ModelProvider } from '../harness/model.js';
+import type { StopReason } from '../harness/session.js';
 import type { TerminalState, Requirement } from '../harness/events.js';
 
 /**
@@ -47,6 +48,11 @@ export function exitCodeFor(state: TerminalState): number {
     case 'COMPLETED_UNVERIFIED': return 3;
     case 'CANCELLED': return 4;
   }
+}
+
+/** Why a session stopped without finishing. Exported for testing. */
+export function describeStop(stop: StopReason): string {
+  return stop === 'cancelled' ? 'cancelled by user' : `budget exhausted (${stop})`;
 }
 
 export interface AgentOptions {
@@ -124,7 +130,7 @@ export async function runAgent(opts: AgentOptions): Promise<number> {
   process.on('SIGINT', onSigint);
 
   try {
-    await runTurn({
+    const stop = await runTurn({
       journal, artifacts, registry, world,
       policy: new DefaultPolicy(),
       approvals: new TerminalApprovalHost(),
@@ -143,17 +149,25 @@ export async function runAgent(opts: AgentOptions): Promise<number> {
 
     const events = journal.replay(sessionId);
     const terminal = events.map((e) => e.event).find((e) => e.type === 'session.terminal');
-    // A cancelled session writes no terminal event at all (see harness/loop.ts);
-    // this is the one place that gap is resolved into a reportable state.
+    // A cancelled OR budget-stopped session writes no terminal event at all
+    // (see harness/loop.ts) — both stay resumable by design. This is the one
+    // place that gap is resolved into a reportable state; exitCodeFor still
+    // treats every such stop as CANCELLED, see describeStop for what actually
+    // distinguishes them for the human-readable report.
     const state: TerminalState = terminal?.type === 'session.terminal'
       ? terminal.state : 'CANCELLED';
+
+    // No terminal event means the session was STOPPED, not finished, and stays
+    // resumable. The StopReason says which — falling back to CANCELLED for all
+    // of them reports a blown budget as if the user had hit Ctrl-C.
+    const stoppedBecause = terminal === undefined ? describeStop(stop) : undefined;
 
     if (opts.json === true) {
       for (const e of events) {
         stdout.write(JSON.stringify({ ...e, logicalClock: e.logicalClock.toString() }) + '\n');
       }
     } else {
-      stdout.write(renderReport(events, state));
+      stdout.write(renderReport(events, state, stoppedBecause));
     }
     return exitCodeFor(state);
   } finally {
@@ -164,7 +178,7 @@ export async function runAgent(opts: AgentOptions): Promise<number> {
 }
 
 function renderReport(
-  events: ReturnType<Journal['replay']>, state: TerminalState
+  events: ReturnType<Journal['replay']>, state: TerminalState, stoppedBecause?: string
 ): string {
   const changed = new Set<string>();
   const lines: string[] = [];
@@ -186,7 +200,10 @@ function renderReport(
   }
   // Every line below comes from a VerificationResult, never from model prose.
   if (lines.length > 0) out.push('Verification:', ...lines, '');
-  out.push(state, '');
+  out.push(stoppedBecause === undefined ? state : `${state} — ${stoppedBecause}`, '');
+  // Only a session that stopped rather than finished stays resumable — a
+  // COMPLETED_VERIFIED run should not be told to resume.
+  if (stoppedBecause !== undefined) out.push('  Resume with: jam agent --resume <id>', '');
   return out.join('\n');
 }
 
