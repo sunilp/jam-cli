@@ -3256,11 +3256,19 @@ export async function dispatch(
       callId: call.id, tool: tool.name, risk, reason: decision.reason,
       summary: JSON.stringify(value).slice(0, 400),
     }, signal);
-    if (!granted) decision = { type: 'deny', reason: 'declined by user' };
-    else decision = { type: 'allow' };
+    // Journal the ORIGINAL approval_required decision, not a rewritten
+    // 'allow'. Overwriting it destroys the fact that a human was asked and
+    // said yes — the audit trail must be able to show human sign-off.
+    deps.journal.append(sessionId, { type: 'tool.decided', callId: call.id, decision });
+    if (!granted) {
+      decision = { type: 'deny', reason: 'declined by user' };
+      deps.journal.append(sessionId, { type: 'tool.decided', callId: call.id, decision });
+    } else {
+      decision = { type: 'allow' };
+    }
+  } else {
+    deps.journal.append(sessionId, { type: 'tool.decided', callId: call.id, decision });
   }
-
-  deps.journal.append(sessionId, { type: 'tool.decided', callId: call.id, decision });
 
   if (decision.type === 'deny') {
     // A refusal is information for the model, not an exception.
@@ -3564,6 +3572,43 @@ describe('NaiveContext', () => {
     expect(ctx.messages[1]!.content).toBe('keep me');
     const size = ctx.messages.reduce((n, m) => n + m.content.length, 0);
     expect(size).toBeLessThanOrEqual(4000 + SYSTEM_PROMPT.length);
+    // Dropping the NEWEST instead of the oldest would also satisfy the size
+    // check, so pin which end survives: the most recent turn must be there.
+    expect(ctx.messages.at(-1)!.content).toContain('filler 399');
+    j.close();
+  });
+
+  it('lets the model tie each result back to the call that produced it', () => {
+    // Without the tool name the model sees a bare result and cannot tell which
+    // of several in-flight calls it belongs to.
+    const j = new Journal(':memory:');
+    const s = j.createSession({ task: 't', cwd: '/w', requirements: [] });
+    j.append(s, { type: 'tool.requested', callId: 'c1', tool: 'search_text',
+                  input: { query: 'needle' }, risk: 'R0' });
+    j.append(s, { type: 'tool.completed', callId: 'c1',
+                  result: { ok: true, preview: 'found 3' }, durationMs: 4 });
+
+    const ctx = new NaiveContext(j, new ToolRegistry()).build(s);
+    const rendered = ctx.messages.map((m) => m.content).join('\n');
+    expect(rendered).toContain('calling search_text');
+    expect(rendered).toContain('search_text ok: found 3');
+    j.close();
+  });
+
+  it('numbers verification attempts so repeats are distinguishable', () => {
+    const j = new Journal(':memory:');
+    const s = j.createSession({ task: 't', cwd: '/w', requirements: [] });
+    const fail = {
+      requirement: 'npm test', exitCode: 1, passed: false, durationMs: 1,
+      outputDigest: 'd', artifactDigest: 'a',
+    };
+    j.append(s, { type: 'verification.completed', results: [fail] });
+    j.append(s, { type: 'verification.completed', results: [fail] });
+
+    const ctx = new NaiveContext(j, new ToolRegistry()).build(s);
+    const rendered = ctx.messages.map((m) => m.content).join('\n');
+    expect(rendered).toContain('attempt 1');
+    expect(rendered).toContain('attempt 2');
     j.close();
   });
 });
@@ -3578,6 +3623,7 @@ Expected: FAIL — cannot resolve `./context.js`
 
 ```ts
 // src/harness/context.ts
+import { preview } from './artifacts.js';
 import type { Journal } from './journal.js';
 import type { ToolRegistry } from './tools/registry.js';
 import type { ModelMessage, ModelRequest } from './model.js';
@@ -3614,6 +3660,10 @@ export class NaiveContext implements ContextProvider {
     const events = this.journal.replay(sessionId);
     const head: ModelMessage[] = [{ role: 'system', content: SYSTEM_PROMPT }];
     const body: ModelMessage[] = [];
+    // A result the model cannot tie back to a call is unusable. Nothing else
+    // carries the tool name, so remember it when the call is requested.
+    const toolFor = new Map<string, string>();
+    let verificationRound = 0;
 
     for (const { event } of events) {
       switch (event.type) {
@@ -3626,23 +3676,38 @@ export class NaiveContext implements ContextProvider {
         case 'model.completed':
           if (event.content !== null) body.push({ role: 'assistant', content: event.content });
           break;
-        case 'tool.completed':
+        case 'tool.requested':
+          toolFor.set(event.callId, event.tool);
+          body.push({
+            role: 'assistant',
+            content: `calling ${event.tool}(${preview(JSON.stringify(event.input), { maxChars: 600 })})`,
+          });
+          break;
+        case 'tool.completed': {
+          const name = toolFor.get(event.callId) ?? 'tool';
           body.push({
             role: 'tool',
             content: event.result.ok
-              ? `[${event.callId}] ok: ${event.result.preview}`
-              : `[${event.callId}] error ${event.result.errorType}: ${event.result.preview}`,
+              ? `${name} ok: ${event.result.preview}`
+              : `${name} error ${event.result.errorType}: ${event.result.preview}`,
           });
           break;
+        }
         case 'tool.decided':
           if (event.decision.type === 'deny') {
-            body.push({ role: 'tool', content: `[${event.callId}] denied: ${event.decision.reason}` });
+            body.push({
+              role: 'tool',
+              content: `${toolFor.get(event.callId) ?? 'tool'} denied: ${event.decision.reason}`,
+            });
           }
           break;
         case 'verification.completed':
+          verificationRound += 1;
           body.push({
             role: 'tool',
-            content: 'verification:\n' + event.results
+            // Numbered: repeated failures otherwise stack as indistinguishable
+            // blocks and the model cannot tell which one is current.
+            content: `verification (attempt ${verificationRound}):\n` + event.results
               .map((r) => `${r.passed ? 'PASS' : 'FAIL'} ${r.requirement} (exit ${r.exitCode})`)
               .join('\n'),
           });
