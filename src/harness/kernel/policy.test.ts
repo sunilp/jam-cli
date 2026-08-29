@@ -132,6 +132,32 @@ describe('DefaultPolicy', () => {
     expect(d.type).toBe('allow');
   });
 
+  it('allows a benign apply_patch whose diff body contains a deep relative ' +
+     'import, rather than treating the whole patch blob as one path', () => {
+    // stringsIn returns the entire patch as a single string; before this fix,
+    // resolve(root, wholePatch) split that blob on '/' and any deep relative
+    // reference inside an ordinary diff line (not a file header) tripped the
+    // workspace-escape check, over-triggering approval_required on a normal
+    // patch — which applyFailClosed turns into a hard deny in CI.
+    const d = p.evaluate({
+      ...base, tool: 'apply_patch', risk: 'R1',
+      input: { patch:
+        '--- a/src/x.ts\n+++ b/src/x.ts\n' +
+        "@@ -1,2 +1,2 @@\n-import a from '../../old';\n+import a from '../../../src/x';\n",
+      },
+    });
+    expect(d.type).toBe('allow');
+  });
+
+  it('still denies .jam/ inside an apply_patch diff, unaffected by the ' +
+     'workspace-escape scoping change', () => {
+    const d = p.evaluate({
+      ...base, tool: 'apply_patch', risk: 'R1',
+      input: { patch: '--- a/.jam/config.yaml\n+++ b/.jam/config.yaml\n' },
+    });
+    expect(d.type).toBe('deny');
+  });
+
   it('treats a Windows drive-letter path as outside a posix workspace', () => {
     const d = p.evaluate({
       ...base, tool: 'run_command', risk: 'R0',

@@ -26,8 +26,10 @@ export function combine(a: PolicyDecision, b: PolicyDecision): PolicyDecision {
 
 // run_command belongs here: a shell can mutate .jam/ just as effectively as a
 // patch, and leaving it out downgrades the one categorical rule in the design
-// to an approval prompt the model can talk its way past.
-const MUTATION_CAPABLE = new Set(['apply_patch', 'write_file', 'run_command']);
+// to an approval prompt the model can talk its way past. There is no
+// 'write_file' tool — it was never registered (see tools/registry.ts) and
+// listing it here read as coverage that does not exist.
+const MUTATION_CAPABLE = new Set(['apply_patch', 'run_command']);
 
 /** `.jam` as a path segment, separator-normalised. Matches .jam/, ./.jam/,
  *  a/../.jam/, /abs/.jam/x, .jam\config.yaml and bare `.jam`; not `.jamfile`. */
@@ -57,7 +59,16 @@ export class DefaultPolicy implements PolicyEngine {
     // cat/head/grep are R0, so `cat /etc/passwd` was auto-allowed with no
     // prompt at all. Full confinement is the sandbox's job (sub-project 2), but
     // a path that leaves the workspace must at least reach a human first.
-    if (MUTATION_CAPABLE.has(input.tool) && this.escapesWorkspace(input)) {
+    //
+    // Scoped to run_command, not every MUTATION_CAPABLE tool: apply_patch's
+    // input is a single opaque unified-diff blob, and stringsIn returns that
+    // whole blob as one "string". Resolving it as a path meant a perfectly
+    // benign patch containing a deep relative import (e.g. a line touching
+    // `../../src/x`) was treated as if the entire diff were a path outside the
+    // workspace, over-triggering approval_required — which applyFailClosed
+    // turns into a hard deny in CI. The .jam/ protection above is unaffected
+    // and still covers apply_patch unconditionally.
+    if (input.tool === 'run_command' && this.escapesWorkspace(input)) {
       return { type: 'approval_required', reason: 'references a path outside the workspace' };
     }
 
