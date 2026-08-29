@@ -57,7 +57,28 @@ describe('preview', () => {
     const oneHugeLine = JSON.stringify({ content: 'x'.repeat(200_000) });
     const p = preview(oneHugeLine);
     expect(p.length).toBeLessThan(10_000);
-    expect(p).toContain('more characters elided');
+    // A single "line" that overflows the character budget now takes the
+    // sectioned path (it fails the character axis of the early-return check)
+    // and is truncated by clampSection's single-oversized-line handling,
+    // which keeps the actual content prefix rather than a generic notice.
+    expect(p).toContain('line truncated');
+  });
+
+  it('sections few-but-very-long lines instead of blind-cutting them', () => {
+    const lines = Array.from({ length: 60 }, (_, i) => `line ${i} ` + 'x'.repeat(2000));
+    lines[55] = 'Error: exploded ' + 'y'.repeat(2000);
+    const p = preview(lines.join('\n'));
+
+    expect(p.length).toBeLessThan(20_000);
+    expect(p).toMatch(/elided|truncated/);
+    expect(p).toContain('line 0');
+  });
+
+  it('shows the start of a single line that exceeds its whole budget', () => {
+    const huge = 'Error: ' + 'z'.repeat(50_000);
+    const p = preview(huge, { maxChars: 2_000 });
+    expect(p).toContain('Error: zzz');
+    expect(p.length).toBeLessThan(4_000);
   });
 
   it('keeps the error block and tail even when every line is long', () => {

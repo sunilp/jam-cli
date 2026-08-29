@@ -59,12 +59,21 @@ export function preview(
 ): string {
   const head = opts.head ?? 40;
   const tail = opts.tail ?? 40;
+  const budgetTotal = opts.maxChars ?? MAX_CHARS;
   const lines = content.split('\n');
-  if (lines.length <= head + tail) return clamp(content, opts.maxChars ?? MAX_CHARS);
+  // Return untouched ONLY if it fits on both axes. Few-but-long lines used to
+  // take this path and get a blind end-cut, losing the tail and any error text
+  // with only a generic notice — reachable in production through run_command
+  // and git_diff, which preview real multi-line output.
+  if (lines.length <= head + tail && content.length <= budgetTotal) return content;
 
-  const headLines = lines.slice(0, head);
-  const tailLines = lines.slice(-tail);
-  const middle = lines.slice(head, lines.length - tail);
+  // When line count alone doesn't overflow, there is no head/tail split to
+  // make: everything is "head" (bounded below by its own character budget),
+  // and there is no middle to search for error lines.
+  const overflowsByLines = lines.length > head + tail;
+  const headLines = overflowsByLines ? lines.slice(0, head) : lines;
+  const tailLines = overflowsByLines ? lines.slice(-tail) : [];
+  const middle = overflowsByLines ? lines.slice(head, lines.length - tail) : [];
   const allErrors = middle.filter((l) => ERROR_LINE.test(l));
   const errors = allErrors.slice(0, MAX_ERROR_LINES);
   const dropped = allErrors.length - errors.length;
@@ -73,10 +82,10 @@ export function preview(
   // from the END, which silently eats the tail and even the error block when
   // lines are long — exactly the "dropped without saying so" failure the error
   // notice exists to prevent. Sectioned budgets keep the structure intact.
-  const budget = opts.maxChars ?? MAX_CHARS;
+  const budget = budgetTotal;
   const parts = [
-    ...clampSection(headLines, Math.floor(budget * 0.4)),
-    `… ${middle.length} lines elided …`,
+    ...clampSection(headLines, Math.floor(budget * (overflowsByLines ? 0.4 : 0.7))),
+    ...(middle.length ? [`… ${middle.length} lines elided …`] : []),
     ...(errors.length
       ? [
           '--- error lines ---',
@@ -93,7 +102,9 @@ export function preview(
     // and silently drop the actual last lines of the output — the exact
     // "cuts from the end" failure this whole budgeting scheme exists to avoid,
     // just relocated one level down. Reverse in, clamp, reverse back.
-    ...clampSection([...tailLines].reverse(), Math.floor(budget * 0.3)).reverse(),
+    ...(tailLines.length
+      ? clampSection(tailLines.slice().reverse(), Math.floor(budget * 0.3)).reverse()
+      : []),
   ];
   return clamp(parts.join('\n'), budget * 2);
 }
@@ -102,9 +113,21 @@ export function preview(
 function clampSection(lines: string[], budget: number): string[] {
   const out: string[] = [];
   let used = 0;
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]!;
     if (used + line.length + 1 > budget) {
-      out.push(`… ${lines.length - out.length} more lines elided …`);
+      const room = budget - used;
+      // A single line longer than the whole budget must still contribute its
+      // beginning. Reporting "1 line elided" with no content is useless to a
+      // model trying to read its own stack trace.
+      let consumed = i;
+      if (out.length === 0 && room > 120) {
+        out.push(`${line.slice(0, room - 60)}… line truncated …`);
+        consumed = i + 1;
+      }
+      if (consumed < lines.length) {
+        out.push(`… ${lines.length - consumed} more lines elided …`);
+      }
       return out;
     }
     out.push(line);
