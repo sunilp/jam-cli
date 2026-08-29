@@ -652,6 +652,19 @@ describe('preview', () => {
     expect(p).toContain('more characters elided');
   });
 
+  it('finds error text past the cutoff inside a single truncated line', () => {
+    // dispatch JSON-serialises tool values, which escapes newlines and yields
+    // ONE giant line. Truncating within that line used to discard the rest
+    // without recording it, so an error buried past the cutoff was invisible
+    // and unannounced.
+    const oneLine = 'x'.repeat(20_000) + ' Error: something failed at step 5000 ' + 'y'.repeat(20_000);
+    const p = preview(oneLine);
+
+    expect(p.length).toBeLessThan(20_000);
+    expect(p).toContain('--- error lines ---');
+    expect(p).toContain('Error: something failed at step 5000');
+  });
+
   it('finds error lines dropped by the character budget, not just by line slicing', () => {
     // 60 lines fits under head+tail=80, so nothing is dropped by line slicing —
     // the character budget does the dropping. Error detection used to scan only
@@ -846,14 +859,20 @@ function clampSection(lines: string[], budget: number): Section {
       // beginning. "1 line elided" with no content is useless to a model
       // trying to read its own stack trace.
       let consumed = i;
+      // The REMAINDER of a truncated line is content the model will not see.
+      // It must be reported as dropped, or error text sitting past the cutoff
+      // vanishes from the error scan entirely — which is what happens to
+      // dispatch's JSON-serialised tool output, always one giant line.
+      let remainder: string[] = [];
       if (kept.length === 0 && room > 120) {
         kept.push(`${line.slice(0, room - 60)}… line truncated …`);
+        remainder = [line.slice(room - 60)];
         consumed = i + 1;
       }
       if (consumed < lines.length) {
         kept.push(`… ${lines.length - consumed} more lines elided …`);
       }
-      return { kept, dropped: lines.slice(consumed) };
+      return { kept, dropped: [...remainder, ...lines.slice(consumed)] };
     }
     kept.push(line);
     used += line.length + 1;
