@@ -59,81 +59,83 @@ export function preview(
 ): string {
   const head = opts.head ?? 40;
   const tail = opts.tail ?? 40;
-  const budgetTotal = opts.maxChars ?? MAX_CHARS;
+  const budget = opts.maxChars ?? MAX_CHARS;
   const lines = content.split('\n');
-  // Return untouched ONLY if it fits on both axes. Few-but-long lines used to
-  // take this path and get a blind end-cut, losing the tail and any error text
-  // with only a generic notice — reachable in production through run_command
-  // and git_diff, which preview real multi-line output.
-  if (lines.length <= head + tail && content.length <= budgetTotal) return content;
 
-  // When line count alone doesn't overflow, there is no head/tail split to
-  // make: everything is "head" (bounded below by its own character budget),
-  // and there is no middle to search for error lines.
+  // Untouched only if it fits on BOTH axes.
+  if (lines.length <= head + tail && content.length <= budget) return content;
+
   const overflowsByLines = lines.length > head + tail;
   const headLines = overflowsByLines ? lines.slice(0, head) : lines;
   const tailLines = overflowsByLines ? lines.slice(-tail) : [];
   const middle = overflowsByLines ? lines.slice(head, lines.length - tail) : [];
-  const allErrors = middle.filter((l) => ERROR_LINE.test(l));
-  const errors = allErrors.slice(0, MAX_ERROR_LINES);
-  const dropped = allErrors.length - errors.length;
 
-  // Budget each section separately. A blind clamp of the joined string cuts
-  // from the END, which silently eats the tail and even the error block when
-  // lines are long — exactly the "dropped without saying so" failure the error
-  // notice exists to prevent. Sectioned budgets keep the structure intact.
-  const budget = budgetTotal;
+  const headPart = clampSection(headLines, Math.floor(budget * (overflowsByLines ? 0.4 : 0.7)));
+  const tailPart = tailLines.length
+    ? reversed(clampSection(tailLines.slice().reverse(), Math.floor(budget * 0.3)))
+    : { kept: [], dropped: [] };
+
+  // Scan everything that will NOT reach the model, whatever dropped it. Scanning
+  // only the line-sliced middle meant error detection never ran at all when the
+  // content fit by line count and overflowed only on characters — which is the
+  // shape run_command, git_diff and dispatch's JSON-serialised values actually
+  // produce. Error lines then survived by position, not by guarantee.
+  const unseen = [...headPart.dropped, ...middle, ...tailPart.dropped];
+  const allErrors = unseen.filter((l) => ERROR_LINE.test(l));
+  const errors = allErrors.slice(0, MAX_ERROR_LINES);
+  const omitted = allErrors.length - errors.length;
+
   const parts = [
-    ...clampSection(headLines, Math.floor(budget * (overflowsByLines ? 0.4 : 0.7))),
+    ...headPart.kept,
     ...(middle.length ? [`… ${middle.length} lines elided …`] : []),
     ...(errors.length
       ? [
           '--- error lines ---',
-          ...clampSection(errors, Math.floor(budget * 0.3)),
+          ...clampSection(errors, Math.floor(budget * 0.3)).kept,
           // Never drop error lines without saying so: a model debugging a
           // failure it caused must know its stack trace was truncated.
-          ...(dropped > 0 ? [`… ${dropped} more error lines omitted …`] : []),
+          ...(omitted > 0 ? [`… ${omitted} more error lines omitted …`] : []),
         ]
       : []),
-    // clampSection keeps whatever fits from the FRONT of what it's given and
-    // elides the rest — correct for head (keep the earliest lines) and for
-    // errors (already front-truncated to MAX_ERROR_LINES above), but backwards
-    // for tail: without reversing, it would keep tailLines' earliest entries
-    // and silently drop the actual last lines of the output — the exact
-    // "cuts from the end" failure this whole budgeting scheme exists to avoid,
-    // just relocated one level down. Reverse in, clamp, reverse back.
-    ...(tailLines.length
-      ? clampSection(tailLines.slice().reverse(), Math.floor(budget * 0.3)).reverse()
-      : []),
+    ...tailPart.kept,
   ];
   return clamp(parts.join('\n'), budget * 2);
 }
 
-/** Keep as many whole lines as fit, and say how many were left out. */
-function clampSection(lines: string[], budget: number): string[] {
-  const out: string[] = [];
+interface Section { kept: string[]; dropped: string[] }
+
+function reversed(s: Section): Section {
+  return { kept: s.kept.slice().reverse(), dropped: s.dropped };
+}
+
+/**
+ * Keep as many whole lines as fit, say how many were left out, and report
+ * exactly which lines were dropped so the caller can scan them for errors.
+ */
+function clampSection(lines: string[], budget: number): Section {
+  const kept: string[] = [];
   let used = 0;
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i]!;
     if (used + line.length + 1 > budget) {
       const room = budget - used;
       // A single line longer than the whole budget must still contribute its
-      // beginning. Reporting "1 line elided" with no content is useless to a
-      // model trying to read its own stack trace.
+      // beginning. "1 line elided" with no content is useless to a model
+      // trying to read its own stack trace.
       let consumed = i;
-      if (out.length === 0 && room > 120) {
-        out.push(`${line.slice(0, room - 60)}… line truncated …`);
+      if (kept.length === 0 && room > 120) {
+        kept.push(`${line.slice(0, room - 60)}… line truncated …`);
         consumed = i + 1;
       }
       if (consumed < lines.length) {
-        out.push(`… ${lines.length - consumed} more lines elided …`);
+        kept.push(`… ${lines.length - consumed} more lines elided …`);
       }
-      return out;
+      return { kept, dropped: lines.slice(consumed) };
     }
-    out.push(line);
+    kept.push(line);
     used += line.length + 1;
   }
-  return out;
+  return { kept, dropped: [] };
 }
 
 /**

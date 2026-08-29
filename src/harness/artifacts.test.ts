@@ -64,6 +64,16 @@ describe('preview', () => {
     expect(p).toContain('line truncated');
   });
 
+  it('finds error lines dropped by the character budget, not just by line slicing', () => {
+    const lines = Array.from({ length: 60 }, (_, i) => `line ${i} ` + 'x'.repeat(2000));
+    lines[55] = 'Error: exploded near the end ' + 'y'.repeat(500);
+    const p = preview(lines.join('\n'));
+
+    expect(p.length).toBeLessThan(20_000);
+    expect(p).toContain('--- error lines ---');
+    expect(p).toContain('Error: exploded near the end');
+  });
+
   it('sections few-but-very-long lines instead of blind-cutting them', () => {
     const lines = Array.from({ length: 60 }, (_, i) => `line ${i} ` + 'x'.repeat(2000));
     lines[55] = 'Error: exploded ' + 'y'.repeat(2000);
