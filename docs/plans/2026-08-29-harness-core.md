@@ -3875,20 +3875,35 @@ describe('Verifier', () => {
     expect(verdict.exhausted).toBe(false);
   });
 
-  it('never reports satisfied when verification was cut short', async () => {
-    // Aborting between two requirements leaves a partial results array whose
-    // entries all passed. Without a completeness check that reads as satisfied,
-    // which would reach COMPLETED_VERIFIED by cancelling at the right moment.
-    const v = new Verifier(world, root, artifacts, [
+  it('never reports satisfied when verification was cut short mid-run', async () => {
+    // The disaster window is an abort BETWEEN requirements, after the first has
+    // PASSED — that leaves a one-entry array where every entry passed, which
+    // reads as satisfied without a completeness check. Pre-aborting is a
+    // different, weaker case: results stays empty and the pre-existing
+    // length > 0 check already blocks it, so a pre-abort test proves nothing.
+    const ac = new AbortController();
+    let runs = 0;
+    const abortAfterFirst: ExecutionWorld = {
+      ...world,
+      subprocess: {
+        run: async (req) => {
+          const r = await world.subprocess.run(req);
+          runs += 1;
+          if (runs === 1) ac.abort();
+          return r;
+        },
+      },
+    };
+
+    const v = new Verifier(abortAfterFirst, root, artifacts, [
       { command: 'node -e "process.exit(0)"', mustExit: 0 },
       { command: 'node -e "process.exit(0)"', mustExit: 0 },
     ], 3);
-    const ac = new AbortController();
-    ac.abort();
     const verdict = await v.evaluate(0, ac.signal);
 
-    expect(verdict.results.length).toBeLessThan(2);
-    expect(verdict.satisfied).toBe(false);
+    expect(verdict.results).toHaveLength(1);        // the first ran
+    expect(verdict.results[0]!.passed).toBe(true);  // and it passed
+    expect(verdict.satisfied).toBe(false);          // and it is STILL not satisfied
     expect(verdict.runnable).toBe(false);
   });
 
