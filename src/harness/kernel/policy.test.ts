@@ -103,4 +103,24 @@ describe('DefaultPolicy', () => {
     });
     expect(d.type).toBe('allow');
   });
+
+  it('escalates a shell command that reaches outside the workspace', () => {
+    for (const args of [['/etc/passwd'], ['../../secrets.txt'], ['/tmp/elsewhere/x']]) {
+      const d = p.evaluate({
+        ...base, tool: 'run_command', risk: 'R0',
+        input: { command: 'cat', args }, workspaceRoot: '/w',
+      });
+      expect(d, JSON.stringify(args)).toMatchObject({ type: 'approval_required' });
+    }
+  });
+
+  it('leaves ordinary in-workspace commands alone', () => {
+    for (const args of [['test'], ['run', 'build'], ['src/index.ts']]) {
+      const d = p.evaluate({
+        ...base, tool: 'run_command', risk: 'R1',
+        input: { command: 'npm', args }, workspaceRoot: '/w',
+      });
+      expect(d, JSON.stringify(args)).toMatchObject({ type: 'allow' });
+    }
+  });
 });

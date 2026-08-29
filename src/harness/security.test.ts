@@ -234,6 +234,20 @@ describe('workspace boundary', () => {
     expect(last()).toMatchObject({ result: { ok: false, errorType: 'sandbox.denied' } });
   });
 
+  it('refuses an absolute path outside the workspace, independent of nesting depth', async () => {
+    // The relative case above is weaker than it looks: from a deeply-nested
+    // mkdtemp root, '../../../etc/passwd' resolves to a path that does not
+    // actually exist (it lands a few directories up inside the OS tmp tree,
+    // nowhere near the real /etc/passwd) -- so with the traversal check
+    // disabled, that case only demotes from sandbox.denied to not_found. It
+    // never proves an actual leak. This case does: /etc/passwd genuinely
+    // exists and is readable on this machine, so with the guard disabled the
+    // result comes back ok:true with the real file's content.
+    await dispatch(makeDeps(), sessionId,
+      { id: '1', name: 'read_file', arguments: { path: '/etc/passwd' } }, signal());
+    expect(last()).toMatchObject({ result: { ok: false, errorType: 'sandbox.denied' } });
+  });
+
   it('refuses a symlink that escapes the workspace', async () => {
     const outside = await mkdtemp(join(tmpdir(), 'jam-outside-'));
     extraDirs.push(outside);
@@ -255,6 +269,49 @@ describe('workspace boundary', () => {
     expect(last()).toMatchObject({
       type: 'tool.completed', result: { ok: true },
     });
+  });
+
+  it('refuses a symlink loop, the non-ENOENT fail-closed branch of safePath', async () => {
+    // safePath's realpath call can fail for reasons other than "does not
+    // exist yet" -- ELOOP, EACCES, an invalid argument -- and the code
+    // deliberately treats anything but ENOENT as a refusal, not a pass:
+    // "a boundary guard that fails open is not a boundary guard." Before this
+    // test, that branch had zero coverage: disabling it broke nothing.
+    await symlink(join(root, 'b'), join(root, 'a'));
+    await symlink(join(root, 'a'), join(root, 'b'));
+    await dispatch(makeDeps(), sessionId,
+      { id: '1', name: 'read_file', arguments: { path: 'a' } }, signal());
+    expect(last()).toMatchObject({ result: { ok: false, errorType: 'sandbox.denied' } });
+  });
+});
+
+describe('a shell command cannot read outside the workspace either', () => {
+  // Once live: run_command never calls safePath, and cat/head/tail/grep/find
+  // are R0, so `cat /etc/passwd` was auto-allowed with no policy check and no
+  // approval prompt at all -- the boundary that stops read_file reaching
+  // ~/.ssh/id_rsa did not apply to the shell tool. DefaultPolicy now escalates
+  // any MUTATION_CAPABLE call whose arguments reference a path outside the
+  // workspace to approval_required, so a human sees it before it runs.
+  it('escalates cat /etc/passwd to approval instead of auto-allowing it', async () => {
+    class SpyApprovalHost implements ApprovalHost {
+      requested = false;
+      available(): boolean { return true; }
+      request(): Promise<boolean> { this.requested = true; return Promise.resolve(true); }
+    }
+    const spy = new SpyApprovalHost();
+    await dispatch(makeDeps(spy), sessionId,
+      { id: '1', name: 'run_command', arguments: { command: 'cat', args: ['/etc/passwd'] } },
+      signal());
+    const decided = journal.replay(sessionId).find((e) => e.event.type === 'tool.decided')!;
+    expect(decided.event).toMatchObject({ decision: { type: 'approval_required' } });
+    expect(spy.requested).toBe(true);
+  });
+
+  it('denies cat /etc/passwd outright, and never executes it, with no approver available', async () => {
+    await dispatch(makeDeps(new AutoDenyApprovalHost()), sessionId,
+      { id: '1', name: 'run_command', arguments: { command: 'cat', args: ['/etc/passwd'] } },
+      signal());
+    expect(last()).toMatchObject({ result: { ok: false, errorType: 'sandbox.denied' } });
   });
 });
 
