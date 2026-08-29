@@ -91,6 +91,41 @@ describe('dispatch', () => {
     expect(executed).toEqual(['risky']);
   });
 
+  it('bounds a huge tool result instead of putting it all in the journal', async () => {
+    const huge: Tool<Record<string, never>, { content: string }> = {
+      name: 'huge', description: 'big', input: z.object({}), risk: 'R0', mutates: false,
+      execute: () => Promise.resolve({ ok: true, value: { content: 'x'.repeat(300_000) } }),
+    };
+    deps.registry.register(huge);
+    await dispatch(deps, sessionId, { id: '1', name: 'huge', arguments: {} },
+      new AbortController().signal);
+
+    const done = journal.replay(sessionId).at(-1)!.event as
+      { type: string; result: { preview: string; artifactDigest?: string } };
+    expect(done.result.preview.length).toBeLessThan(10_000);
+    expect(done.result.artifactDigest).toBeDefined();
+    expect(deps.artifacts.get(done.result.artifactDigest!)!.length).toBeGreaterThan(299_000);
+  });
+
+  it('journals events a tool emitted before it threw', async () => {
+    const emitsThenThrows: Tool<Record<string, never>, null> = {
+      name: 'emits_then_throws', description: 'x', input: z.object({}),
+      risk: 'R0', mutates: true,
+      execute: (_i, c) => {
+        c.emit({ type: 'file.modified', path: 'touched.ts',
+                 ownership: 'agent', checkpointId: '' });
+        throw new Error('boom');
+      },
+    };
+    deps.registry.register(emitsThenThrows);
+    await dispatch(deps, sessionId, { id: '1', name: 'emits_then_throws', arguments: {} },
+      new AbortController().signal, 'model', 'cp-1');
+
+    const types = journal.replay(sessionId).map((e) => e.event.type);
+    expect(types).toContain('file.modified');
+    expect(types).toContain('tool.completed');
+  });
+
   it('reports an unknown tool as not_found', async () => {
     await dispatch(deps, sessionId, { id: '1', name: 'nope', arguments: {} },
       new AbortController().signal);

@@ -53,6 +53,13 @@ describe('preview', () => {
     expect(p).toContain('Error: boom');
   });
 
+  it('bounds a single enormous line, which line counting alone cannot', () => {
+    const oneHugeLine = JSON.stringify({ content: 'x'.repeat(200_000) });
+    const p = preview(oneHugeLine);
+    expect(p.length).toBeLessThan(10_000);
+    expect(p).toContain('more characters elided');
+  });
+
   it('says so when it omits error lines beyond the cap', () => {
     const lines = Array.from({ length: 300 }, (_, i) => `line ${i}`);
     for (let i = 100; i < 130; i++) lines[i] = `Error: boom ${i}`;

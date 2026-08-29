@@ -5,6 +5,9 @@ export interface ArtifactRef { digest: string; size: number }
 
 const ERROR_LINE = /\b(error|exception|failed|failure|panic|traceback|fatal)\b/i;
 const MAX_ERROR_LINES = 20;
+/** Line counting alone does not bound a single enormous line — and
+ *  JSON.stringify turns any multi-line value into exactly one. */
+const MAX_CHARS = 8_000;
 
 export class ArtifactStore {
   private readonly db: DatabaseSyncType;
@@ -52,12 +55,12 @@ export class ArtifactStore {
  */
 export function preview(
   content: string,
-  opts: { head?: number; tail?: number } = {}
+  opts: { head?: number; tail?: number; maxChars?: number } = {}
 ): string {
   const head = opts.head ?? 40;
   const tail = opts.tail ?? 40;
   const lines = content.split('\n');
-  if (lines.length <= head + tail) return content;
+  if (lines.length <= head + tail) return clamp(content, opts.maxChars ?? MAX_CHARS);
 
   const headLines = lines.slice(0, head);
   const tailLines = lines.slice(-tail);
@@ -79,5 +82,16 @@ export function preview(
       : []),
     ...tailLines,
   ];
-  return parts.join('\n');
+  return clamp(parts.join('\n'), opts.maxChars ?? MAX_CHARS);
+}
+
+/**
+ * Hard character ceiling. Without it a single 500KB line — which is exactly
+ * what JSON.stringify produces from any multi-line value, since it escapes
+ * newlines — sails through the line-count check untouched and lands whole in
+ * the journal and the model's context.
+ */
+function clamp(s: string, maxChars: number): string {
+  if (s.length <= maxChars) return s;
+  return `${s.slice(0, maxChars)}\n… ${s.length - maxChars} more characters elided …`;
 }

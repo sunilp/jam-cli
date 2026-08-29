@@ -104,15 +104,16 @@ export async function dispatch(
   };
 
   let result;
+  let threw: unknown;
   try {
     result = await tool.execute(value, ctx);
   } catch (err) {
-    return fail(call.id, {
-      type: 'internal', recoverable: false,
-      message: err instanceof Error ? err.message : String(err),
-    }, deps, sessionId, startedAt);
+    threw = err;
   }
 
+  // Journal emitted events BEFORE handling a throw. A tool that emits
+  // file.modified and then throws has still changed the workspace, and
+  // dropping those events would leave an unlogged mutation.
   // Tools cannot know their checkpoint; the loop owns it, so stamp it here.
   for (const e of emitted) {
     deps.journal.append(
@@ -121,14 +122,27 @@ export async function dispatch(
     );
   }
 
+  if (threw !== undefined || result === undefined) {
+    return fail(call.id, {
+      type: 'internal', recoverable: false,
+      message: threw instanceof Error ? threw.message : String(threw),
+    }, deps, sessionId, startedAt);
+  }
+
   // (10) normalize, (13) durable event
-  const summary: ToolResultSummary = result.ok
-    ? {
-        ok: true,
-        preview: preview(JSON.stringify(result.value)),
-        artifactDigest: result.artifact?.digest,
-      }
-    : { ok: false, errorType: result.error.type, preview: result.error.message };
+  // Keep the full value retrievable even when the tool did not store one
+  // itself: read_file, list_dir and search_text return potentially huge values
+  // and have no artifact of their own.
+  let summary: ToolResultSummary;
+  if (result.ok) {
+    const serialized = JSON.stringify(result.value);
+    const artifact = result.artifact
+      ?? (serialized.length > 8_000 ? deps.artifacts.put(serialized, 'application/json') : undefined);
+    summary = { ok: true, preview: preview(serialized), artifactDigest: artifact?.digest };
+  } else {
+    summary = { ok: false, errorType: result.error.type,
+                preview: preview(result.error.message) };
+  }
 
   deps.journal.append(sessionId, {
     type: 'tool.completed', callId: call.id, result: summary,
