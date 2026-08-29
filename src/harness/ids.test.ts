@@ -17,6 +17,22 @@ describe('uuidv7', () => {
     expect(new Set(ids).size).toBe(5000);
   });
 
+  it('writes the wall clock into the 48-bit big-endian timestamp field', () => {
+    resetUuidv7State();
+
+    const before = Date.now();
+    const id = uuidv7();
+    const after = Date.now();
+
+    // The leading 12 hex digits are the 48-bit big-endian timestamp: the field
+    // cross-millisecond ordering rests on, so read it back and check the bytes
+    // landed in the right order at the right offset.
+    const timestamp = parseInt(id.slice(0, 8) + id.slice(9, 13), 16);
+
+    expect(timestamp).toBeGreaterThanOrEqual(before);
+    expect(timestamp).toBeLessThanOrEqual(after);
+  });
+
   it('generates ids with increasing timestamps despite clock regression', () => {
     const mockNow = vi.spyOn(Date, 'now');
 
