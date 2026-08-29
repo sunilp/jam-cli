@@ -3,6 +3,19 @@ import type { ExecutionWorld } from './world/types.js';
 
 export interface CheckpointInfo { id: string; ref: string; label: string; at: number }
 
+export interface RestoreResult {
+  /** Paths reverted to their checkpoint content. */
+  reverted: string[];
+  /**
+   * Paths that exist now but not in the checkpoint — files created after it.
+   * `git checkout <ref> -- .` cannot remove them, and deleting them blindly
+   * would risk destroying work the developer created alongside the agent. So
+   * they are REPORTED, never silently left behind: a rollback that quietly
+   * restores only part of the tree is worse than one that says what it missed.
+   */
+  notRemoved: string[];
+}
+
 /**
  * Git-backed and out of the way of the developer's own history: checkpoints are
  * stash-like commit objects written to refs/jam/checkpoints/<id>, never to a
@@ -34,10 +47,24 @@ export class CheckpointStore {
     return info;
   }
 
-  async restore(id: string): Promise<void> {
+  async restore(id: string): Promise<RestoreResult> {
     const info = this.meta.get(id);
     if (!info) throw new Error(`Unknown checkpoint: ${id}`);
+
+    // Everything tracked in the checkpoint, before we change anything.
+    const inCheckpoint = new Set(
+      (await this.git(['ls-tree', '-r', '--name-only', info.ref]))
+        .split('\n').filter((l) => l !== '')
+    );
+    const nowTracked = (await this.git(['ls-files']))
+      .split('\n').filter((l) => l !== '');
+
     await this.git(['checkout', info.ref, '--', '.']);
+
+    return {
+      reverted: [...inCheckpoint],
+      notRemoved: nowTracked.filter((f) => !inCheckpoint.has(f)),
+    };
   }
 
   list(): Promise<CheckpointInfo[]> {

@@ -36,6 +36,21 @@ describe('CheckpointStore', () => {
     expect(await readFile(join(root, 'a.txt'), 'utf-8')).toBe('original\n');
   });
 
+  it('reports files it could not remove instead of claiming a full rollback', async () => {
+    const store = new CheckpointStore(world, root);
+    const cp = await store.create('before edit');
+
+    await writeFile(join(root, 'a.txt'), 'modified\n');
+    await writeFile(join(root, 'new.txt'), 'created by the agent\n');
+    await git(['add', 'new.txt']);
+
+    const result = await store.restore(cp.id);
+
+    expect(await readFile(join(root, 'a.txt'), 'utf-8')).toBe('original\n');
+    expect(result.reverted).toContain('a.txt');
+    expect(result.notRemoved).toEqual(['new.txt']);
+  });
+
   it('lists checkpoints newest first', async () => {
     const store = new CheckpointStore(world, root);
     const one = await store.create('one');
