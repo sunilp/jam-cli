@@ -123,4 +123,20 @@ describe('DefaultPolicy', () => {
       expect(d, JSON.stringify(args)).toMatchObject({ type: 'allow' });
     }
   });
+
+  it('does not prompt for a relative path that never leaves the workspace', () => {
+    const d = p.evaluate({
+      ...base, tool: 'run_command', risk: 'R1',
+      input: { command: 'cat', args: ['src/../src/index.ts'] }, workspaceRoot: '/w',
+    });
+    expect(d.type).toBe('allow');
+  });
+
+  it('treats a Windows drive-letter path as outside a posix workspace', () => {
+    const d = p.evaluate({
+      ...base, tool: 'run_command', risk: 'R0',
+      input: { command: 'cat', args: ['C:\\Users\\x\\secret.txt'] }, workspaceRoot: '/w',
+    });
+    expect(d.type).toBe('approval_required');
+  });
 });

@@ -50,6 +50,14 @@ describe('classifyRisk', () => {
   it('defaults an unknown executable to R2 rather than allowing it', () => {
     expect(classifyRisk('some-unknown-binary', [])).toBe('R2');
   });
+
+  it('does not auto-allow an interpreter given inline code', () => {
+    expect(classifyRisk('node', ['-e', "require('fs').readFileSync('/etc/passwd')"])).toBe('R2');
+    expect(classifyRisk('python3', ['-c', 'open("/etc/passwd").read()'])).toBe('R2');
+    expect(classifyRisk('ruby', ['-e', 'puts 1'])).toBe('R2');
+    expect(classifyRisk('node', ['scripts/build.js'])).toBe('R1');
+    expect(classifyRisk('npm', ['test'])).toBe('R1');
+  });
 });
 
 describe('run_command', () => {

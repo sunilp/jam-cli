@@ -74,17 +74,23 @@ export class DefaultPolicy implements PolicyEngine {
     }
   }
 
-  /** Any argument that is an absolute path outside the root, or walks out via `..`. */
+  /**
+   * Any argument that resolves outside the workspace. Resolving rather than
+   * pattern-matching handles absolute paths, `..` walks, and Windows drive
+   * letters uniformly — and stops `src/../src/x.ts`, which never leaves, from
+   * prompting. It cannot see symlinks: the policy layer is pure, so a
+   * workspace-local link pointing out is still the sandbox's problem.
+   */
   private escapesWorkspace(input: PolicyInput): boolean {
     const root = resolve(input.workspaceRoot);
     return stringsIn(input.input).some((s) => {
-      if (!s.includes('/') && !s.includes('\\')) return false;   // not path-shaped
       const norm = s.replace(/\\/g, '/');
-      if (norm.startsWith('/')) {
-        const abs = resolve(norm);
-        return abs !== root && !abs.startsWith(root + sep);
-      }
-      return norm.split('/').includes('..');
+      const looksLikePath = norm.includes('/') || /^[a-zA-Z]:/.test(norm);
+      if (!looksLikePath) return false;
+      // A drive-letter path can never be inside a posix workspace root.
+      if (/^[a-zA-Z]:/.test(norm)) return true;
+      const abs = resolve(root, norm);
+      return abs !== root && !abs.startsWith(root + sep);
     });
   }
 

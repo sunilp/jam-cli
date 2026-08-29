@@ -315,6 +315,24 @@ describe('a shell command cannot read outside the workspace either', () => {
   });
 });
 
+describe('an interpreter given inline code cannot bypass every path check', () => {
+  // Once live: `node -e "require('fs').readFileSync('/etc/passwd','utf8')"` was
+  // R1 (allow) -- the path lives INSIDE the code string, so no argument-level
+  // path check can ever see it. Same for python3 -c, ruby -e and friends.
+  it('reaches approval for node -e instead of executing it', async () => {
+    await dispatch(makeDeps(new AutoDenyApprovalHost()), sessionId, {
+      id: '1', name: 'run_command',
+      arguments: {
+        command: 'node',
+        args: ['-e', "require('fs').readFileSync('/etc/passwd','utf8')"],
+      },
+    }, signal());
+    const decided = journal.replay(sessionId).find((e) => e.event.type === 'tool.decided')!;
+    expect(decided.event).toMatchObject({ decision: { type: 'deny' } });
+    expect(last()).toMatchObject({ result: { ok: false, errorType: 'sandbox.denied' } });
+  });
+});
+
 describe('indirect prompt injection cannot escalate privilege', () => {
   it('renders untrusted file content as a tool-role message, never system, ' +
      'and a subsequent escape attempt is still refused by safePath', async () => {
