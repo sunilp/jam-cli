@@ -3987,7 +3987,7 @@ export class Verifier {
     private readonly maxRetries: number
   ) {}
 
-  async evaluate(round: number): Promise<Verdict> {
+  async evaluate(round: number, signal?: AbortSignal): Promise<Verdict> {
     if (this.requirements.length === 0) {
       return { runnable: false, satisfied: false, exhausted: true, results: [] };
     }
@@ -3998,13 +3998,14 @@ export class Verifier {
     for (const req of this.requirements) {
       if (req.gitDiffCheck === true) {
         results.push(await this.run(
-          'git diff --check', 'git', ['diff', '--check'], 0, req.timeoutMs));
+          'git diff --check', 'git', ['diff', '--check'], 0, req.timeoutMs, signal));
         continue;
       }
       if (req.command === undefined) continue;
 
+      if (signal?.aborted === true) break;
       const [exe, args] = shellInvocation(req.command);
-      const r = await this.run(req.command, exe, args, req.mustExit ?? 0, req.timeoutMs);
+      const r = await this.run(req.command, exe, args, req.mustExit ?? 0, req.timeoutMs, signal);
       // spawnFailed, not exitCode -1: a killed process also reports -1, and
       // treating a timed-out check as "not executable" would report
       // COMPLETED_UNVERIFIED instead of COMPLETED_PARTIAL.
@@ -4022,10 +4023,13 @@ export class Verifier {
   }
 
   private async run(
-    label: string, exe: string, args: string[], mustExit: number, timeoutMs = 600_000
+    label: string, exe: string, args: string[], mustExit: number,
+    timeoutMs = 600_000, signal?: AbortSignal
   ): Promise<VerificationResult> {
+    // Threaded so Ctrl-C kills a long check. Without it the wall-clock deadline
+    // is only a between-rounds gate and one slow requirement outruns it.
     const r = await this.world.subprocess.run({
-      command: exe, args, cwd: this.root, timeoutMs,
+      command: exe, args, cwd: this.root, timeoutMs, signal,
     });
     const combined = r.stderr === '' ? r.stdout : `${r.stdout}\n--- stderr ---\n${r.stderr}`;
     const artifact = this.artifacts.put(combined);
@@ -4225,6 +4229,37 @@ describe('runTurn', () => {
     });
   });
 
+  it('returns cancelled when the signal fires while the model is responding', async () => {
+    // MockProvider ignores its signal, so this window needs a stub. Without an
+    // abort check after generate() resolves, the turn goes on to verify and
+    // writes a terminal event for a session that must stay resumable.
+    const d = await deps([{ content: 'done', toolCalls: [] }], PASSING);
+    const ac = new AbortController();
+    d.provider = {
+      name: 'aborting', model: 'stub',
+      capabilities: () => Promise.resolve({ toolCalling: true, streaming: false, contextWindow: 1000 }),
+      countTokens: () => Promise.resolve(1),
+      generate: () => { ac.abort(); return Promise.resolve({ content: 'done', toolCalls: [] }); },
+    };
+    const s = d.journal.createSession({ task: 't', cwd: root, requirements: PASSING });
+
+    expect(await runTurn(d, s, 't', ac.signal)).toBe('cancelled');
+    expect(d.journal.replay(s).map((e) => e.event.type)).not.toContain('session.terminal');
+  });
+
+  it('records FAILED rather than rejecting when a dependency throws', async () => {
+    // Only generate() was guarded, so a throw anywhere else escaped as an
+    // unhandled rejection with no terminal event and no StopReason.
+    const d = await deps([{ content: 'done', toolCalls: [] }], PASSING);
+    d.context = { build: () => { throw new Error('context exploded'); } };
+    const s = d.journal.createSession({ task: 't', cwd: root, requirements: PASSING });
+
+    expect(await runTurn(d, s, 't', new AbortController().signal)).toBe('end_turn');
+    expect(d.journal.replay(s).at(-1)!.event).toMatchObject({
+      type: 'session.terminal', state: 'FAILED',
+    });
+  });
+
   it('returns cancelled on abort and leaves the session resumable', async () => {
     const d = await deps([{ content: 'done', toolCalls: [] }], PASSING);
     const s = d.journal.createSession({ task: 't', cwd: root, requirements: PASSING });
@@ -4333,6 +4368,32 @@ export async function runTurn(
   prompt: string,
   signal: AbortSignal
 ): Promise<StopReason> {
+  try {
+    return await turn(deps, sessionId, prompt, signal);
+  } catch (err) {
+    // Nothing may escape as a rejected promise. Only provider.generate() was
+    // guarded before, so a throw from context.build, verifier.evaluate,
+    // journal.append or dispatch left the caller with neither a terminal event
+    // nor a StopReason — an unhandled rejection instead of a recorded outcome.
+    if (signal.aborted) return 'cancelled';
+    deps.journal.append(sessionId, {
+      type: 'model.failed',
+      error: {
+        type: 'internal', recoverable: false,
+        message: err instanceof Error ? err.message : String(err),
+      },
+    });
+    finish(deps, sessionId, 'FAILED');
+    return 'end_turn';
+  }
+}
+
+async function turn(
+  deps: LoopDeps,
+  sessionId: string,
+  prompt: string,
+  signal: AbortSignal
+): Promise<StopReason> {
   if (signal.aborted) return 'cancelled';
 
   const budget = new Budget(deps.budget);
@@ -4367,6 +4428,11 @@ export async function runTurn(
       return 'end_turn';
     }
 
+    // The signal can fire WHILE generate() is in flight. Without this check the
+    // turn proceeds to verify and writes a terminal event for a cancelled
+    // session, which must stay resumable.
+    if (signal.aborted) return 'cancelled';
+
     if (res.unrecoverable === true) {
       deps.journal.append(sessionId, {
         type: 'model.failed',
@@ -4386,7 +4452,7 @@ export async function runTurn(
 
     if (res.toolCalls.length === 0) {
       // The model wants to stop. It does not get to decide that.
-      const verdict = await deps.verifier.evaluate(round);
+      const verdict = await deps.verifier.evaluate(round, signal);
       deps.journal.append(sessionId, {
         type: 'verification.completed', results: verdict.results,
       });
