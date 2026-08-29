@@ -962,15 +962,53 @@ describe('LocalExecutionWorld.subprocess', () => {
     expect(() => process.kill(grandchild, 0)).toThrow();
   });
 
-  it('aborts on signal', async () => {
+  it('aborts on signal and actually kills the process', async () => {
     const w = new LocalExecutionWorld();
     const ac = new AbortController();
-    setTimeout(() => ac.abort(), 100);
+    const script = 'console.log(process.pid); setTimeout(()=>{},60000);';
+    setTimeout(() => ac.abort(), 150);
     const r = await w.subprocess.run({
-      command: 'node', args: ['-e', 'setTimeout(()=>{},60000)'],
+      command: 'node', args: ['-e', script],
       cwd: process.cwd(), timeoutMs: 30_000, signal: ac.signal,
     });
     expect(r.aborted).toBe(true);
+    // Setting the flag without killing would leave this pid alive.
+    const pid = Number(r.stdout.trim());
+    await new Promise((res) => setTimeout(res, 200));
+    expect(() => process.kill(pid, 0)).toThrow();
+  });
+
+  it('returns immediately for a signal aborted before the call', async () => {
+    // addEventListener('abort') never fires on an already-aborted signal, so a
+    // naive implementation waits out the whole timeout and reports aborted:false.
+    const w = new LocalExecutionWorld();
+    const ac = new AbortController();
+    ac.abort();
+    const started = Date.now();
+    const r = await w.subprocess.run({
+      command: 'node', args: ['-e', 'setTimeout(()=>{},60000)'],
+      cwd: process.cwd(), timeoutMs: 5_000, signal: ac.signal,
+    });
+    expect(r.aborted).toBe(true);
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
+  it('distinguishes a spawn failure from a killed process', async () => {
+    const w = new LocalExecutionWorld();
+    const missing = await w.subprocess.run({
+      command: 'definitely-not-a-real-binary-xyz', args: [],
+      cwd: process.cwd(), timeoutMs: 10_000,
+    });
+    expect(missing.spawnFailed).toBe(true);
+
+    const killed = await w.subprocess.run({
+      command: 'node', args: ['-e', 'setTimeout(()=>{},60000)'],
+      cwd: process.cwd(), timeoutMs: 300,
+    });
+    // Both report exitCode -1; only the first failed to start.
+    expect(killed.exitCode).toBe(-1);
+    expect(killed.spawnFailed).toBe(false);
+    expect(killed.timedOut).toBe(true);
   });
 });
 ```
@@ -1014,6 +1052,14 @@ export interface ProcResult {
   stderr: string;
   timedOut: boolean;
   aborted: boolean;
+  /**
+   * The process could not be started at all (binary missing, EACCES).
+   * Distinct from a process that started and was killed, which also reports
+   * exitCode -1 because `close` gives a null code. Task 15's verifier keys
+   * "requirement is not executable" off this, so conflating the two would
+   * report a timed-out check as COMPLETED_UNVERIFIED instead of PARTIAL.
+   */
+  spawnFailed: boolean;
   durationMs: number;
 }
 
@@ -1071,6 +1117,18 @@ const localSubprocess: SubprocessRuntime = {
   run(req: ProcRequest): Promise<ProcResult> {
     return new Promise<ProcResult>((resolve) => {
       const startedAt = Date.now();
+
+      // addEventListener('abort') never fires on an already-aborted signal, so
+      // without this an aborted caller waits out the FULL timeout (minutes for
+      // a verification command) and is told aborted: false. Never spawn.
+      if (req.signal?.aborted === true) {
+        resolve({
+          exitCode: -1, stdout: '', stderr: '', timedOut: false,
+          aborted: true, spawnFailed: false, durationMs: 0,
+        });
+        return;
+      }
+
       // detached puts the child in its own process group so we can signal the
       // whole tree. Without this a cancelled `npm test` orphans its runner.
       const child = spawn(req.command, req.args, {
@@ -1104,18 +1162,18 @@ const localSubprocess: SubprocessRuntime = {
       const onAbort = (): void => { aborted = true; killTree(); };
       req.signal?.addEventListener('abort', onAbort, { once: true });
 
-      const finish = (exitCode: number): void => {
+      const finish = (exitCode: number, spawnFailed = false): void => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
         req.signal?.removeEventListener('abort', onAbort);
         resolve({
-          exitCode, stdout, stderr, timedOut, aborted,
+          exitCode, stdout, stderr, timedOut, aborted, spawnFailed,
           durationMs: Date.now() - startedAt,
         });
       };
 
-      child.on('error', () => finish(-1));
+      child.on('error', () => finish(-1, true));
       child.on('close', (code) => finish(code ?? -1));
     });
   },
@@ -3239,8 +3297,10 @@ export class Verifier {
 
       const [exe, args] = shellInvocation(req.command);
       const r = await this.run(req.command, exe, args, req.mustExit ?? 0);
-      // -1 is spawn failure; 127 is the shell's "command not found".
-      if (r.exitCode === -1 || r.exitCode === 127) executable = false;
+      // spawnFailed, not exitCode -1: a killed process also reports -1, and
+      // treating a timed-out check as "not executable" would report
+      // COMPLETED_UNVERIFIED instead of COMPLETED_PARTIAL.
+      if (r.spawnFailed || r.exitCode === 127) executable = false;
       results.push(r);
     }
 
