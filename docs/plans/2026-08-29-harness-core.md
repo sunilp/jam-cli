@@ -1414,6 +1414,26 @@ export function riskOf<I>(tool: Tool<I, unknown>, input: I): RiskLevel {
  * src/tools/types.ts, which threw JamError; this throws a plain Error that
  * dispatch converts into a sandbox.denied ToolResult.
  */
+/**
+ * Map a filesystem errno onto a StructuredError. Permission and I/O failures
+ * are EXPECTED — a repo can contain a file the agent may not read — so they
+ * must come back as values. Letting them throw pushes them into dispatch's
+ * catch-all, which reports `internal, recoverable: false`: strictly less
+ * actionable for the model than knowing it hit a permission wall.
+ */
+export function fsError(err: unknown, path: string): StructuredError {
+  const code = (err as NodeJS.ErrnoException).code;
+  if (code === 'EACCES' || code === 'EPERM') {
+    return { type: 'sandbox.denied', recoverable: false,
+             message: `Permission denied reading "${path}".` };
+  }
+  if (code === 'ENOENT' || code === 'ENOTDIR') {
+    return { type: 'not_found', recoverable: true, message: `No such path: ${path}` };
+  }
+  return { type: 'internal', recoverable: true,
+           message: `Cannot access "${path}": ${code ?? 'unknown error'}` };
+}
+
 export async function safePath(
   world: ExecutionWorld,
   workspaceRoot: string,
@@ -1891,6 +1911,7 @@ import { join } from 'node:path';
 import { readFileTool } from './read_file.js';
 import { listDirTool } from './list_dir.js';
 import { searchTextTool } from './search_text.js';
+import { gitDiffTool } from './git_diff.js';
 import { LocalExecutionWorld } from '../world/local.js';
 import { ArtifactStore } from '../artifacts.js';
 import type { ToolContext } from './types.js';
@@ -1943,6 +1964,40 @@ describe('list_dir', () => {
   });
 });
 
+describe('git_diff', () => {
+  it('returns a structured error outside a git repo rather than throwing', async () => {
+    const r = await gitDiffTool.execute({}, ctx);
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.error.type).toBe('internal');
+  });
+
+  it('stores the full diff as an artifact and only previews it to the model', async () => {
+    // Without this, a large diff lands whole in the model's context — the
+    // failure preview() exists to prevent. Mutation-checked: removing the
+    // artifact store left every other test passing.
+    const world = new LocalExecutionWorld();
+    const git = async (args: string[]): Promise<void> => {
+      const r = await world.subprocess.run({ command: 'git', args, cwd: root, timeoutMs: 15_000 });
+      if (r.exitCode !== 0) throw new Error(r.stderr);
+    };
+    await git(['init', '-q']);
+    await git(['config', 'user.email', 't@example.com']);
+    await git(['config', 'user.name', 'T']);
+    await git(['add', '-A']);
+    await git(['commit', '-qm', 'init']);
+
+    const big = Array.from({ length: 400 }, (_, i) => `line ${i}`).join('\n');
+    await writeFile(join(root, 'a.txt'), `${big}\n`);
+
+    const r = await gitDiffTool.execute({}, ctx);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.artifact).toBeDefined();
+    expect(r.value.diff).toContain('lines elided');
+    expect(ctx.artifacts.get(r.artifact!.digest)).toContain('line 399');
+  });
+});
+
 describe('search_text', () => {
   it('finds matches with file and line', async () => {
     const r = await searchTextTool.execute({ query: 'needle' }, ctx);
@@ -1967,7 +2022,7 @@ Expected: FAIL — cannot resolve `./read_file.js`
 ```ts
 // src/harness/tools/read_file.ts
 import { z } from 'zod';
-import { safePath } from './types.js';
+import { safePath, fsError } from './types.js';
 import type { Tool } from './types.js';
 
 const MAX_BYTES = 500 * 1024;
@@ -2002,7 +2057,12 @@ export const readFileTool: Tool<z.infer<typeof input>, { content: string; trunca
       } };
     }
 
-    let content = await ctx.world.fs.readFile(abs);
+    let content: string;
+    try {
+      content = await ctx.world.fs.readFile(abs);
+    } catch (err) {
+      return { ok: false, error: fsError(err, args.path) };
+    }
     let truncated = false;
     if (Buffer.byteLength(content) > MAX_BYTES) {
       content = content.slice(0, MAX_BYTES);
@@ -2024,7 +2084,7 @@ export const readFileTool: Tool<z.infer<typeof input>, { content: string; trunca
 ```ts
 // src/harness/tools/list_dir.ts
 import { z } from 'zod';
-import { safePath } from './types.js';
+import { safePath, fsError } from './types.js';
 import type { Tool } from './types.js';
 import type { DirEntry } from '../world/types.js';
 
@@ -2055,7 +2115,11 @@ export const listDirTool: Tool<z.infer<typeof input>, { entries: DirEntry[] }> =
         type: 'not_found', recoverable: true, message: `No such directory: ${args.path}`,
       } };
     }
-    return { ok: true, value: { entries: await ctx.world.fs.list(abs) } };
+    try {
+      return { ok: true, value: { entries: await ctx.world.fs.list(abs) } };
+    } catch (err) {
+      return { ok: false, error: fsError(err, args.path) };
+    }
   },
 };
 ```
