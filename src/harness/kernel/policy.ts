@@ -66,8 +66,11 @@ export class DefaultPolicy implements PolicyEngine {
   }
 
   private touchesProtectedPath(input: unknown): boolean {
+    // Lower-cased: macOS and Windows filesystems are case-insensitive by
+    // default, so `.JAM/config.yaml` reaches the same file as `.jam/`.
+    // Without this a one-character change turns a categorical deny into allow.
     return stringsIn(input).some((s) =>
-      PROTECTED_SEGMENT.test(s.replace(/\\/g, '/'))
+      PROTECTED_SEGMENT.test(s.replace(/\\/g, '/').toLowerCase())
     );
   }
 }
