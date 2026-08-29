@@ -4581,6 +4581,21 @@ describe('assertNodeSupported', () => {
 });
 
 describe('startup failures', () => {
+  it('reports an unreadable --task-file without a stack trace', async () => {
+    const errors: string[] = [];
+    const spy = vi.spyOn(process.stderr, 'write')
+      .mockImplementation((s) => { errors.push(String(s)); return true; });
+    try {
+      const code = await runAgentCommand(undefined,
+        { taskFile: '/definitely/not/a/real/path.md' }, {});
+      expect(code).toBe(1);
+      expect(errors.join('')).toContain('cannot start');
+      expect(errors.join('')).not.toContain('at Object.');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('reports an unusable provider without a stack trace', async () => {
     // The version guard and provider construction both throw before a session
     // exists. Uncaught, they crash with a raw Node stack trace — and the
@@ -4847,28 +4862,29 @@ export async function runAgentCommand(
   cmdOpts: Record<string, unknown>,
   globalOpts: { provider?: string; model?: string }
 ): Promise<number> {
-  const taskFile = cmdOpts['taskFile'];
-  const resolved = typeof taskFile === 'string'
-    ? await readFile(taskFile, 'utf-8')
-    : task;
-
-  if (resolved === undefined || resolved.trim() === '') {
-    process.stderr.write('A task is required: jam agent "fix the failing tests"\n');
-    return 1;
-  }
-
   // ONE boundary around everything that can throw before the session exists:
-  // the Node version guard, config loading, and provider construction. Without
-  // it an unusable provider or an old runtime crashes with a raw stack trace —
-  // and the version guard exists precisely to print an actionable message.
+  // the task-file read, the Node version guard, config loading and provider
+  // construction. Without it a mistyped path, an unusable provider or an old
+  // runtime crashes with a raw stack trace — and the version guard exists
+  // precisely to print an actionable message.
   try {
+    const taskFile = cmdOpts['taskFile'];
+    const resolved = typeof taskFile === 'string'
+      ? await readFile(taskFile, 'utf-8')
+      : task;
+
+    if (resolved === undefined || resolved.trim() === '') {
+      process.stderr.write('A task is required: jam agent "fix the failing tests"\n');
+      return 1;
+    }
+
     const { createHarnessProvider } = await import('../harness/provider-factory.js');
     return await runAgent({
-    task: resolved,
-    cwd: process.cwd(),
-    provider: await createHarnessProvider(globalOpts),
-    extraVerify: cmdOpts['verify'] as string[] | undefined,
-    json: cmdOpts['json'] === true,
+      task: resolved,
+      cwd: process.cwd(),
+      provider: await createHarnessProvider(globalOpts),
+      extraVerify: cmdOpts['verify'] as string[] | undefined,
+      json: cmdOpts['json'] === true,
       maxToolCalls: Number(cmdOpts['maxToolCalls'] ?? 200),
       timeoutMs: Number(cmdOpts['timeout'] ?? 30 * 60_000),
     });
