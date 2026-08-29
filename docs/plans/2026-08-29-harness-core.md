@@ -597,9 +597,27 @@ describe('ArtifactStore', () => {
     s.close();
   });
 
-  it('deduplicates identical content', () => {
+  it('deduplicates identical content into a single stored row', () => {
+    // Comparing the two digests proves nothing: the digest is sha256(content),
+    // computed without touching storage, so it matches even with dedup broken.
+    // Assert the stored row count instead.
     const s = new ArtifactStore(':memory:');
-    expect(s.put('same').digest).toBe(s.put('same').digest);
+    const a = s.put('same');
+    s.put('same');
+    s.put('same');
+    expect(s.count(a.digest)).toBe(1);
+    s.close();
+  });
+
+  it('gives different content different digests', () => {
+    const s = new ArtifactStore(':memory:');
+    expect(s.put('one').digest).not.toBe(s.put('two').digest);
+    s.close();
+  });
+
+  it('returns undefined for an unknown digest rather than throwing', () => {
+    const s = new ArtifactStore(':memory:');
+    expect(s.get('0'.repeat(64))).toBeUndefined();
     s.close();
   });
 });
@@ -624,6 +642,15 @@ describe('preview', () => {
     const p = preview(lines.join('\n'), { head: 2, tail: 2 });
     expect(p).toContain('Error: boom');
   });
+
+  it('says so when it omits error lines beyond the cap', () => {
+    // Silent truncation of a stack trace is the failure this guards against.
+    const lines = Array.from({ length: 300 }, (_, i) => `line ${i}`);
+    for (let i = 100; i < 130; i++) lines[i] = `Error: boom ${i}`;
+    const p = preview(lines.join('\n'), { head: 2, tail: 2 });
+    expect(p).toContain('Error: boom 100');
+    expect(p).toContain('10 more error lines omitted');
+  });
 });
 ```
 
@@ -642,6 +669,7 @@ import { createHash } from 'node:crypto';
 export interface ArtifactRef { digest: string; size: number }
 
 const ERROR_LINE = /\b(error|exception|failed|failure|panic|traceback|fatal)\b/i;
+const MAX_ERROR_LINES = 20;
 
 export class ArtifactStore {
   private readonly db: DatabaseSync;
@@ -664,6 +692,14 @@ export class ArtifactStore {
        VALUES (?, ?, ?, ?, ?)`
     ).run(digest, size, mediaType, Date.now(), content);
     return { digest, size };
+  }
+
+  /** Rows stored for a digest. Exists so the dedup test can assert storage. */
+  count(digest: string): number {
+    const row = this.db.prepare(
+      `SELECT COUNT(*) AS n FROM artifacts WHERE digest = ?`
+    ).get(digest) as { n: number };
+    return row.n;
   }
 
   get(digest: string): string | undefined {
@@ -691,12 +727,22 @@ export function preview(
   const headLines = lines.slice(0, head);
   const tailLines = lines.slice(-tail);
   const middle = lines.slice(head, lines.length - tail);
-  const errors = middle.filter((l) => ERROR_LINE.test(l)).slice(0, 20);
+  const allErrors = middle.filter((l) => ERROR_LINE.test(l));
+  const errors = allErrors.slice(0, MAX_ERROR_LINES);
+  const dropped = allErrors.length - errors.length;
 
   const parts = [
     ...headLines,
     `… ${middle.length} lines elided …`,
-    ...(errors.length ? ['--- error lines ---', ...errors] : []),
+    ...(errors.length
+      ? [
+          '--- error lines ---',
+          ...errors,
+          // Never drop error lines without saying so: a model debugging a
+          // failure it caused must know its stack trace was truncated.
+          ...(dropped > 0 ? [`… ${dropped} more error lines omitted …`] : []),
+        ]
+      : []),
     ...tailLines,
   ];
   return parts.join('\n');
@@ -748,6 +794,22 @@ describe('RingTelemetry', () => {
     t.write({ kind: 'model.delta', text: 'x' });
     t.drop();
     expect(t.recent()).toEqual([]);
+  });
+
+  it('cannot grow without bound', () => {
+    // The whole point: the journal is durable, telemetry is disposable, so a
+    // leak here reproduces the multi-GB heap this design exists to avoid.
+    const t = new RingTelemetry(50);
+    for (let i = 0; i < 100_000; i++) t.write({ kind: 'model.delta', text: `${i}` });
+    expect(t.recent().length).toBe(50);
+    expect((t.recent().at(-1) as { text: string }).text).toBe('99999');
+  });
+
+  it('handles a capacity of 1', () => {
+    const t = new RingTelemetry(1);
+    t.write({ kind: 'model.delta', text: 'a' });
+    t.write({ kind: 'model.delta', text: 'b' });
+    expect(t.recent()).toEqual([{ kind: 'model.delta', text: 'b' }]);
   });
 });
 ```
