@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { safePath } from './types.js';
+import { safePath, fsError } from './types.js';
 import type { Tool } from './types.js';
 
 const MAX_BYTES = 500 * 1024;
@@ -34,7 +34,12 @@ export const readFileTool: Tool<z.infer<typeof input>, { content: string; trunca
       } };
     }
 
-    let content = await ctx.world.fs.readFile(abs);
+    let content: string;
+    try {
+      content = await ctx.world.fs.readFile(abs);
+    } catch (err) {
+      return { ok: false, error: fsError(err, args.path) };
+    }
     let truncated = false;
     if (Buffer.byteLength(content) > MAX_BYTES) {
       content = content.slice(0, MAX_BYTES);

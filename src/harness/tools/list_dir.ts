@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { safePath } from './types.js';
+import { safePath, fsError } from './types.js';
 import type { Tool } from './types.js';
 import type { DirEntry } from '../world/types.js';
 
@@ -30,6 +30,10 @@ export const listDirTool: Tool<z.infer<typeof input>, { entries: DirEntry[] }> =
         type: 'not_found', recoverable: true, message: `No such directory: ${args.path}`,
       } };
     }
-    return { ok: true, value: { entries: await ctx.world.fs.list(abs) } };
+    try {
+      return { ok: true, value: { entries: await ctx.world.fs.list(abs) } };
+    } catch (err) {
+      return { ok: false, error: fsError(err, args.path) };
+    }
   },
 };

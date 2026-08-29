@@ -50,6 +50,24 @@ export function riskOf<I>(tool: Tool<I, unknown>, input: I): RiskLevel {
 }
 
 /**
+ * Map a filesystem errno onto a StructuredError. Permission and I/O failures
+ * are EXPECTED — a repo can contain a file the agent may not read — so they
+ * must come back as values rather than throwing.
+ */
+export function fsError(err: unknown, path: string): StructuredError {
+  const code = (err as NodeJS.ErrnoException).code;
+  if (code === 'EACCES' || code === 'EPERM') {
+    return { type: 'sandbox.denied', recoverable: false,
+             message: `Permission denied reading "${path}".` };
+  }
+  if (code === 'ENOENT' || code === 'ENOTDIR') {
+    return { type: 'not_found', recoverable: true, message: `No such path: ${path}` };
+  }
+  return { type: 'internal', recoverable: true,
+           message: `Cannot access "${path}": ${code ?? 'unknown error'}` };
+}
+
+/**
  * Pipeline step 2, canonicalization. Resolves relative to the workspace root
  * and refuses to leave it, including via symlink. Adapted from the archived
  * src/tools/types.ts, which threw JamError; this throws a plain Error that
