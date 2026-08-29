@@ -110,17 +110,18 @@ describe('uuidv7', () => {
     }
   });
 
-  it('stays unique and ordered past counter exhaustion in one millisecond', () => {
-    // Drive the clock so the spin-wait can terminate: hold one millisecond for
-    // the first 4096 calls, then let it advance.
+  it('borrows a millisecond when the counter is exhausted', () => {
+    // A frozen clock is safe because nothing spins. 5000 ids in one stamped
+    // millisecond must cross the 4096 counter threshold and force a borrow.
     const spy = vi.spyOn(Date, 'now');
     try {
-      let calls = 0;
-      const base = 1_787_997_500_000;
-      spy.mockImplementation(() => base + (calls++ < 8200 ? 0 : 1));
+      spy.mockReturnValue(1_787_997_500_000);
       const ids = Array.from({ length: 5000 }, () => uuidv7());
       expect(new Set(ids).size).toBe(5000);
       expect([...ids].sort()).toEqual(ids);
+      // The 48-bit timestamp must have advanced; without the borrow it cannot.
+      const stamp = (id: string): string => id.replace(/-/g, '').slice(0, 12);
+      expect(stamp(ids.at(-1)!) > stamp(ids[0]!)).toBe(true);
     } finally {
       spy.mockRestore();
     }
@@ -169,9 +170,11 @@ export function uuidv7(): string {
   if (now === lastMs) {
     counter += 1;
     if (counter > 0xfff) {
-      // Exhausted this millisecond's counter space; wait for the next tick.
-      while (Date.now() === lastMs) { /* spin, sub-millisecond */ }
-      return uuidv7();
+      // Counter exhausted. Borrow a millisecond rather than spinning for the
+      // real clock: under accumulated backward-clock debt a spin burns CPU for
+      // the whole debt. This is RFC 9562's monotonic counter method.
+      lastMs += 1;
+      counter = 0;
     }
   } else {
     lastMs = now;
@@ -179,7 +182,8 @@ export function uuidv7(): string {
   }
 
   const b = randomBytes(16);
-  b.writeUIntBE(now, 0, 6);
+  // lastMs, not now — after a borrow lastMs is ahead and the id must carry it.
+  b.writeUIntBE(lastMs, 0, 6);
   b[6] = 0x70 | ((counter >> 8) & 0x0f);
   b[7] = counter & 0xff;
   b[8] = 0x80 | (b[8]! & 0x3f);
