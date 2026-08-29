@@ -71,6 +71,24 @@ program
     });
   });
 
+// ── agent ─────────────────────────────────────────────────────────────────────
+program
+  .command('agent [task]')
+  .description('Run the coding agent harness on a task')
+  .option('--task-file <path>', 'read the task from a file')
+  .option('--verify <cmd>', 'additional verification command', (v: string, acc: string[]) =>
+    [...acc, v], [] as string[])
+  .option('--json', 'emit the session journal as newline-delimited JSON')
+  .option('--max-tool-calls <n>', 'tool call budget', '200')
+  .option('--timeout <ms>', 'wall clock budget in milliseconds', String(30 * 60_000))
+  .action(async (task: string | undefined, cmdOpts: Record<string, unknown>) => {
+    const { runAgentCommand } = await import('./commands/agent.js');
+    const g = globalOpts();
+    process.exitCode = await runAgentCommand(task, cmdOpts, {
+      provider: g.provider, model: g.model, profile: g.profile,
+    });
+  });
+
 // ── auth ──────────────────────────────────────────────────────────────────────
 const auth = program.command('auth').description('Manage authentication credentials');
 
