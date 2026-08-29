@@ -18,7 +18,13 @@ const R3 = new Set(['rm', 'mv', 'dd', 'truncate', 'shred']);
 const R4 = new Set(['terraform', 'kubectl', 'aws', 'gcloud', 'az', 'helm',
                     'sudo', 'su', 'chown', 'chmod', 'mkfs', 'shutdown', 'reboot']);
 
-const GIT_R3 = new Set(['reset', 'clean', 'push']);
+// Destructive git subcommands. `checkout` earns its place: `git checkout -- .`
+// silently discards every uncommitted change in the tree.
+const GIT_R3 = new Set([
+  'reset', 'clean', 'push', 'checkout', 'restore', 'rm', 'filter-branch', 'gc', 'prune',
+]);
+// `git stash drop` / `clear` destroy stashed work; `stash list` does not.
+const GIT_STASH_R3 = new Set(['drop', 'clear', 'pop']);
 
 /**
  * A conservative classifier. Real argument and pipeline parsing is sub-project 2
@@ -31,6 +37,7 @@ export function classifyRisk(command: string, args: string[] = []): RiskLevel {
   if (R4.has(exe)) return 'R4';
   if (exe === 'git') {
     const sub = args[0] ?? '';
+    if (sub === 'stash') return GIT_STASH_R3.has(args[1] ?? '') ? 'R3' : 'R0';
     if (GIT_R3.has(sub)) return 'R3';
     return 'R0';
   }
@@ -63,11 +70,29 @@ export const runCommandTool: Tool<
     const combined = r.stderr === '' ? r.stdout : `${r.stdout}\n--- stderr ---\n${r.stderr}`;
     const artifact = ctx.artifacts.put(combined);
 
+    // A process that could not START is not a command result. Without this it
+    // returns ok:true with exitCode -1, indistinguishable from a command that
+    // legitimately exited -1 — which is exactly why ProcResult carries
+    // spawnFailed separately from exitCode.
+    if (r.spawnFailed) {
+      return { ok: false, error: {
+        type: 'not_found', recoverable: false,
+        message: `Could not start "${args.command}". Is it installed and on PATH?`,
+      } };
+    }
+
     if (r.timedOut) {
       return { ok: false, error: {
         type: 'shell.timeout', recoverable: true,
         message: `Command timed out after ${args.timeoutMs ?? 120_000}ms`,
         details: { artifactDigest: artifact.digest },
+      } };
+    }
+
+    // Cancellation is not a command result either.
+    if (r.aborted) {
+      return { ok: false, error: {
+        type: 'internal', recoverable: false, message: 'Command cancelled.',
       } };
     }
 

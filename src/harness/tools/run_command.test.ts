@@ -70,6 +70,34 @@ describe('run_command', () => {
     expect(ctx.artifacts.get(r.artifact!.digest)).toContain('line 4999');
   });
 
+  it('reports an unstartable binary as not_found, not a -1 exit code', async () => {
+    const r = await runCommandTool.execute(
+      { command: 'definitely-not-a-real-binary-xyz', args: [] }, ctx);
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.error.type).toBe('not_found');
+  });
+
+  it('reports cancellation rather than reporting it as command output', async () => {
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 120);
+    const r = await runCommandTool.execute(
+      { command: 'node', args: ['-e', 'setTimeout(()=>{},60000)'] },
+      { ...ctx, signal: ac.signal });
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.error.message).toMatch(/cancelled/i);
+  });
+
+  it('classifies destructive git subcommands above auto-allow', () => {
+    expect(classifyRisk('git', ['checkout', '--', '.'])).toBe('R3');
+    expect(classifyRisk('git', ['restore', '.'])).toBe('R3');
+    expect(classifyRisk('git', ['rm', '-r', 'src'])).toBe('R3');
+    expect(classifyRisk('git', ['filter-branch'])).toBe('R3');
+    expect(classifyRisk('git', ['stash', 'drop'])).toBe('R3');
+    expect(classifyRisk('git', ['stash', 'list'])).toBe('R0');
+    expect(classifyRisk('git', ['status'])).toBe('R0');
+    expect(classifyRisk('git', ['diff'])).toBe('R0');
+  });
+
   it('reports a timeout as shell.timeout', async () => {
     const r = await runCommandTool.execute(
       { command: 'node', args: ['-e', 'setTimeout(()=>{},60000)'], timeoutMs: 300 }, ctx);
