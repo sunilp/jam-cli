@@ -1831,6 +1831,24 @@ describe('DefaultPolicy', () => {
     }
   });
 
+  it('does not prompt for a relative path that never leaves the workspace', () => {
+    // src/../src/index.ts resolves back inside; a literal `..` check would
+    // prompt on it, and a guard that prompts constantly gets turned off.
+    const d = p.evaluate({
+      ...base, tool: 'run_command', risk: 'R1',
+      input: { command: 'cat', args: ['src/../src/index.ts'] }, workspaceRoot: '/w',
+    });
+    expect(d.type).toBe('allow');
+  });
+
+  it('treats a Windows drive-letter path as outside a posix workspace', () => {
+    const d = p.evaluate({
+      ...base, tool: 'run_command', risk: 'R0',
+      input: { command: 'cat', args: ['C:\\Users\\x\\secret.txt'] }, workspaceRoot: '/w',
+    });
+    expect(d.type).toBe('approval_required');
+  });
+
   it('leaves ordinary in-workspace commands alone', () => {
     for (const args of [['test'], ['run', 'build'], ['src/index.ts']]) {
       const d = p.evaluate({
@@ -1962,17 +1980,23 @@ export class DefaultPolicy implements PolicyEngine {
     }
   }
 
-  /** Any argument that is an absolute path outside the root, or walks out via `..`. */
+  /**
+   * Any argument that resolves outside the workspace. Resolving rather than
+   * pattern-matching handles absolute paths, `..` walks, and Windows drive
+   * letters uniformly — and stops `src/../src/x.ts`, which never leaves, from
+   * prompting. It cannot see symlinks: the policy layer is pure, so a
+   * workspace-local link pointing out is still the sandbox's problem.
+   */
   private escapesWorkspace(input: PolicyInput): boolean {
     const root = resolve(input.workspaceRoot);
     return stringsIn(input.input).some((s) => {
-      if (!s.includes('/') && !s.includes('\\')) return false;   // not path-shaped
       const norm = s.replace(/\\/g, '/');
-      if (norm.startsWith('/')) {
-        const abs = resolve(norm);
-        return abs !== root && !abs.startsWith(root + sep);
-      }
-      return norm.split('/').includes('..');
+      const looksLikePath = norm.includes('/') || /^[a-zA-Z]:/.test(norm);
+      if (!looksLikePath) return false;
+      // A drive-letter path can never be inside a posix workspace root.
+      if (/^[a-zA-Z]:/.test(norm)) return true;
+      const abs = resolve(root, norm);
+      return abs !== root && !abs.startsWith(root + sep);
     });
   }
 
@@ -2910,6 +2934,17 @@ describe('run_command', () => {
     expect(!r.ok && r.error.message).toMatch(/cancelled/i);
   });
 
+  it('does not auto-allow an interpreter given inline code', () => {
+    // The path lives INSIDE the code string, so no argument-level path check
+    // can see it. node -e reads anything on the machine.
+    expect(classifyRisk('node', ['-e', "require('fs').readFileSync('/etc/passwd')"])).toBe('R2');
+    expect(classifyRisk('python3', ['-c', 'open("/etc/passwd").read()'])).toBe('R2');
+    expect(classifyRisk('ruby', ['-e', 'puts 1'])).toBe('R2');
+    // ...but running a script file is still ordinary work.
+    expect(classifyRisk('node', ['scripts/build.js'])).toBe('R1');
+    expect(classifyRisk('npm', ['test'])).toBe('R1');
+  });
+
   it('classifies destructive git subcommands above auto-allow', () => {
     // `git checkout -- .` discards every uncommitted change in the tree.
     expect(classifyRisk('git', ['checkout', '--', '.'])).toBe('R3');
@@ -2968,6 +3003,15 @@ const GIT_R3 = new Set([
 const GIT_STASH_R3 = new Set(['drop', 'clear', 'pop']);
 
 /**
+ * Interpreters given inline code. `node -e "require('fs').readFileSync('/etc/passwd')"`
+ * reads anything on the machine, and the path never appears as its own argument
+ * so no path check can see it. Auto-allowing that is not defensible; a human
+ * looks at it until real sandboxing lands.
+ */
+const INTERPRETERS = new Set(['node', 'python', 'python3', 'ruby', 'perl', 'php', 'deno', 'bun']);
+const EVAL_FLAGS = new Set(['-e', '--eval', '-c', '--command', '-p', '--print']);
+
+/**
  * A conservative classifier. Real argument and pipeline parsing is sub-project 2
  * (spec section 26); until then an unknown executable is R2, never R0, so it
  * reaches a human rather than running silently.
@@ -2976,6 +3020,7 @@ export function classifyRisk(command: string, args: string[] = []): RiskLevel {
   const exe = command.split('/').pop() ?? command;
 
   if (R4.has(exe)) return 'R4';
+  if (INTERPRETERS.has(exe) && args.some((a) => EVAL_FLAGS.has(a))) return 'R2';
   if (exe === 'git') {
     const sub = args[0] ?? '';
     if (sub === 'stash') return GIT_STASH_R3.has(args[1] ?? '') ? 'R3' : 'R0';
