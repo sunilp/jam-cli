@@ -62,11 +62,12 @@ That's the value. Run it before the change, not after CI breaks.
 - **`jam diagram`** — Mermaid diagrams for architecture or call flow
 - **`jam search`** / **`jam deps`** — symbol search and dependency analysis
 - **`jam mcp serve`** *(Phase 2, coming)* — expose all of the above as an MCP server, so Claude Code, Cursor, Aider, and Goose can call into jam's polyglot intelligence
+- **`jam agent "<task>"`** *(experimental)*: runs a coding-agent loop, then decides completion with a deterministic verifier instead of the model's own claim. Policy-mediated, journalled, resumable. Does not use the cross-language graph yet. [Details below](#jam-agent-experimental).
 - Plus a handful of zero-LLM developer utilities: `ports`, `stats`, `hash`, `json`, `env`, `dup`, `http`, `todo`, `git wtf`, `git undo`, `git standup`, and more
 
 ## What jam is **not**
 
-- Not an AI coding agent. Use Claude Code, Cursor, or Aider for "write this feature."
+- Not an AI coding agent. Use Claude Code, Cursor, or Aider for "write this feature." The exception is `jam agent`, which does run a coding loop, but it is not competing on how well it writes code. It competes on who gets to decide the work is finished. Read its [limitations](#jam-agent-experimental) before trusting the answer.
 - Not a chat tool. Use the official Anthropic, OpenAI, or Google CLIs for that.
 - Not a generic terminal AI. jam answers one question well: *"if I change this, what breaks across my stack?"*
 
@@ -90,15 +91,22 @@ jam doctor                       # check your environment
 jam trace getUserById            # who calls / what does it call
 jam impact users.email           # cross-language column impact
 jam diagram --type architecture  # Mermaid architecture diagram
+jam agent "make src/foo.test.ts pass"   # experimental, Node 22.5+
 ```
 
 ## `jam agent` (experimental)
 
 A coding-agent harness: give it a task, it runs a tool-calling loop against
 your configured model, and it decides completion with a deterministic
-verifier rather than trusting the model's own claim. Every tool call goes
+verifier rather than trusting the model's own claim. `COMPLETED_VERIFIED` is
+not a thing the model can emit. It is computed from exit codes, and it is
+unreachable if you declared nothing to verify. Every tool call goes
 through a policy reference monitor (auto-allow, ask, or deny) and is recorded
 in an append-only session journal, so a run is auditable and resumable.
+
+Reach for it when a run is unattended and an unverified "done" is expensive: CI, batch
+fixes, anything where nobody is going to read the transcript. For interactive work where
+you are watching anyway, Claude Code is the better tool.
 
 ```bash
 jam agent "make the failing test in src/foo.test.ts pass"
@@ -143,13 +151,16 @@ an independent guarantee of correctness.
 
 ## Status
 
+- **Unreleased**: `jam agent`, the coding-agent harness described above. It sits beside the roadmap rather than in it: it needs Node 22.5+, it does not touch the trace path, and it does not delay `jam mcp serve`.
 - **v0.12.0** (current) — Sharp pivot from generic AI CLI to cross-language code intelligence. AI-assistant features (ask/chat/run/go and friends) archived to [`archive/ai-suite`](https://github.com/sunilp/jam-cli/tree/archive/ai-suite).
 - **v0.13** (next) — `jam mcp serve` stdio MCP server. Plug jam into Claude Code / Cursor / Aider / Goose.
 - **v0.14** (after that) — Deep Java (Spring Data, JPA, MyBatis), Python (SQLAlchemy, Django, Alembic), SQL (multi-dialect, views, triggers, stored procs), and Kotlin support.
 
 ## Looking for ask / chat / run / go?
 
-Those commands were removed in v0.12 — they competed with Claude Code without doing anything Claude Code doesn't already do better. The code lives on the [`archive/ai-suite`](https://github.com/sunilp/jam-cli/tree/archive/ai-suite) branch. A future release may revive AI features, but only ones that ride on top of the cross-language graph (impact-aware migration plans, PR-tailored impact summaries, etc.) — not generic chat.
+Those commands were removed in v0.12. They competed with Claude Code without doing anything Claude Code doesn't already do better. The code was archived rather than deleted, on [`archive/ai-suite`](https://github.com/sunilp/jam-cli/tree/archive/ai-suite), because the plan was always to bring AI back once there was something worth bringing back.
+
+`jam agent` is that return, and it is worth being precise about what it does and does not settle. The v0.12 test was whether jam could write code better than Claude Code. It could not, and it still cannot, which is why `ask`, `chat`, `run` and `go` are not coming back. `jam agent` answers a different question: who decides a run is finished. That is not the cross-language graph, which was the other condition set in v0.12 and is still unmet. Until `src/trace/` feeds working-set and test selection, `jam agent` is a generic harness with a strict completion contract, and nothing about it is polyglot. Judge it on the completion contract, not on the graph.
 
 ## License
 
