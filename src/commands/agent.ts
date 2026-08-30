@@ -25,15 +25,19 @@ import type { StopReason } from '../harness/session.js';
 import type { TerminalState, Requirement } from '../harness/events.js';
 
 /**
- * The harness stores its journal in node:sqlite, added in Node 22.5. The rest
- * of jam still supports Node 20, so fail fast here with something actionable
- * rather than letting an import crash with a bare `ERR_UNKNOWN_BUILTIN_MODULE`.
+ * The harness stores its journal in node:sqlite. The module itself landed in
+ * Node 22.5, but stayed behind the --experimental-sqlite flag through 22.12 —
+ * `require('node:sqlite')` throws ERR_UNKNOWN_BUILTIN_MODULE on any of those
+ * versions when the flag isn't set. It only became usable unflagged in Node
+ * 22.13. The rest of jam still supports Node 20, so fail fast here with
+ * something actionable rather than letting an import crash with a bare
+ * `ERR_UNKNOWN_BUILTIN_MODULE`.
  */
 export function assertNodeSupported(version = process.versions.node): void {
   const [major = 0, minor = 0] = version.split('.').map(Number);
-  if (major < 22 || (major === 22 && minor < 5)) {
+  if (major < 22 || (major === 22 && minor < 13)) {
     throw new Error(
-      `jam agent requires Node 22.5 or newer (found ${version}), because it stores ` +
+      `jam agent requires Node 22.13 or newer (found ${version}), because it stores ` +
       `session history using the built-in node:sqlite module. Other jam commands ` +
       `still work on Node 20.`
     );

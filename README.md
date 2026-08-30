@@ -91,7 +91,7 @@ jam doctor                       # check your environment
 jam trace getUserById            # who calls / what does it call
 jam impact users.email           # cross-language column impact
 jam diagram --type architecture  # Mermaid architecture diagram
-jam agent "make src/foo.test.ts pass"   # experimental, Node 22.5+
+jam agent "make src/foo.test.ts pass"   # experimental, Node 22.13+
 ```
 
 ## `jam agent` (experimental)
@@ -136,7 +136,7 @@ engine's decision is fed back to the model as a recoverable tool result, and
 only changes the outcome insofar as it changes what the model does next —
 which may still end in any of the states above.
 
-Requires **Node 22.5+** (it stores session history via the built-in
+Requires **Node 22.13+** (it stores session history via the built-in
 `node:sqlite` module); every other jam command still runs on Node 20.
 `jam agent` fails fast with an actionable message on an older runtime rather
 than crashing.
@@ -151,7 +151,7 @@ an independent guarantee of correctness.
 
 ## Status
 
-- **Unreleased**: `jam agent`, the coding-agent harness described above. It sits beside the roadmap rather than in it: it needs Node 22.5+, it does not touch the trace path, and it does not delay `jam mcp serve`.
+- **Unreleased**: `jam agent`, the coding-agent harness described above. It sits beside the roadmap rather than in it: it needs Node 22.13+, it does not touch the trace path, and it does not delay `jam mcp serve`.
 - **v0.12.0** (current) — Sharp pivot from generic AI CLI to cross-language code intelligence. AI-assistant features (ask/chat/run/go and friends) archived to [`archive/ai-suite`](https://github.com/sunilp/jam-cli/tree/archive/ai-suite).
 - **v0.13** (next) — `jam mcp serve` stdio MCP server. Plug jam into Claude Code / Cursor / Aider / Goose.
 - **v0.14** (after that) — Deep Java (Spring Data, JPA, MyBatis), Python (SQLAlchemy, Django, Alembic), SQL (multi-dialect, views, triggers, stored procs), and Kotlin support.

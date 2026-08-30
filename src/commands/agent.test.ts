@@ -30,14 +30,19 @@ function abortAwareProvider(): ModelProvider {
 }
 
 describe('assertNodeSupported', () => {
-  it('accepts Node 22.5 and newer', () => {
-    expect(() => assertNodeSupported('22.5.0')).not.toThrow();
+  it('accepts Node 22.13 and newer', () => {
+    expect(() => assertNodeSupported('22.13.0')).not.toThrow();
     expect(() => assertNodeSupported('26.7.0')).not.toThrow();
   });
 
   it('rejects older runtimes with an actionable message', () => {
-    expect(() => assertNodeSupported('20.19.0')).toThrow(/requires Node 22\.5/);
-    expect(() => assertNodeSupported('22.4.0')).toThrow(/requires Node 22\.5/);
+    expect(() => assertNodeSupported('20.19.0')).toThrow(/requires Node 22\.13/);
+    expect(() => assertNodeSupported('22.4.0')).toThrow(/requires Node 22\.13/);
+  });
+
+  it('rejects Node 22.5–22.12, where node:sqlite exists but is still flag-gated', () => {
+    expect(() => assertNodeSupported('22.5.0')).toThrow(/requires Node 22\.13/);
+    expect(() => assertNodeSupported('22.12.0')).toThrow(/requires Node 22\.13/);
   });
 });
 
