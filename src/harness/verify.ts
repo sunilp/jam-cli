@@ -54,7 +54,12 @@ export class Verifier {
       // spawnFailed, not exitCode -1: a killed process also reports -1, and
       // treating a timed-out check as "not executable" would report
       // COMPLETED_UNVERIFIED instead of COMPLETED_PARTIAL.
-      if (spawnFailed || result.exitCode === 127) executable = false;
+      // 127 is /bin/sh's "command not found"; 9009 is cmd.exe's equivalent
+      // ("... is not recognized as an internal or external command") on the
+      // Windows branch of shellInvocation above. Without 9009 a missing
+      // command on Windows would read as a legitimate non-zero exit rather
+      // than "the requirement itself cannot run."
+      if (spawnFailed || result.exitCode === 127 || result.exitCode === 9009) executable = false;
       results.push(result);
     }
 

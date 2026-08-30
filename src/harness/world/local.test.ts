@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { LocalExecutionWorld } from './local.js';
+import { LocalExecutionWorld, windowsShellInvocation } from './local.js';
 
 async function fixture(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'jam-world-'));
@@ -97,6 +97,58 @@ describe('LocalExecutionWorld.subprocess', () => {
     });
     expect(r.aborted).toBe(true);
     expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
+  // These run on every platform — they test pure string construction, not
+  // an actual spawn — because the real Windows spawn path (cmd.exe
+  // resolving npm.cmd, taskkill killing the tree) cannot be exercised on
+  // this machine at all. The expected strings were computed by running
+  // windowsShellInvocation directly and reading its output, then fixed here
+  // as a regression pin; they were not independently verified against a
+  // real cmd.exe. The algorithm itself is cross-spawn's documented one
+  // (github.com/moxystudio/node-cross-spawn, MIT, lib/util/escape.js +
+  // lib/parse.js's parseNonShell), reproduced in local.ts rather than
+  // pulled in as a dependency.
+  describe('windowsShellInvocation', () => {
+    it('always routes through cmd.exe /d /s /c with windowsVerbatimArguments in mind', () => {
+      const r = windowsShellInvocation('npm', ['test']);
+      expect(r.file).toBe('cmd.exe');
+      expect(r.args[0]).toBe('/d');
+      expect(r.args[1]).toBe('/s');
+      expect(r.args[2]).toBe('/c');
+      expect(r.args).toHaveLength(4);
+    });
+
+    it('quotes each argument and caret-escapes cmd.exe metacharacters', () => {
+      expect(windowsShellInvocation('npm', ['run', 'test']).args[3])
+        .toBe('"npm ^"run^" ^"test^""');
+    });
+
+    it('neutralises a shell-chaining metacharacter instead of executing it as a second command', () => {
+      // Without escaping, `a&b` passed through a naive shell join would run
+      // `a` then separately run `b` — this is exactly the command-injection
+      // shape jam's run_command tool exists to prevent even on POSIX, where
+      // args are never shell-interpreted in the first place.
+      expect(windowsShellInvocation('echo', ['a&b']).args[3])
+        .toBe('"echo ^"a^&b^""');
+      expect(windowsShellInvocation('echo', ['a|b>c']).args[3])
+        .toBe('"echo ^"a^|b^>c^""');
+    });
+
+    it('escapes an embedded double quote without breaking argument boundaries', () => {
+      expect(windowsShellInvocation('echo', ['a"b']).args[3])
+        .toBe('"echo ^"a\\^"b^""');
+    });
+
+    it('doubles a trailing backslash so it cannot escape the closing quote', () => {
+      expect(windowsShellInvocation('echo', ['trailing\\']).args[3])
+        .toBe('"echo ^"trailing\\\\^""');
+    });
+
+    it('round-trips a realistic multi-flag command', () => {
+      expect(windowsShellInvocation('git', ['commit', '-m', 'fix: handle "quotes" & stuff']).args[3])
+        .toBe('"git ^"commit^" ^"-m^" ^"fix:^ handle^ \\^"quotes\\^"^ ^&^ stuff^""');
+    });
   });
 
   it('distinguishes a spawn failure from a killed process', async () => {

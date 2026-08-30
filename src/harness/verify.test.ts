@@ -215,4 +215,27 @@ describe('Verifier', () => {
     expect(verdict.runnable).toBe(false);
     expect(verdict.results[0]!.passed).toBe(false);
   });
+
+  it('treats exit 9009 (cmd.exe "not recognized") as not runnable, same as 127', async () => {
+    // 127 is what /bin/sh reports for a missing command; this repo's own
+    // Verifier always spawns via shellInvocation (/bin/sh on POSIX, cmd.exe
+    // on win32), so the platform this suite actually runs on here (POSIX)
+    // can never itself produce 9009. Mocked directly so this branch is
+    // covered without a Windows machine to spawn cmd.exe on.
+    const cmdExeNotFound: ExecutionWorld = {
+      ...world,
+      subprocess: {
+        run: async (req) => ({
+          ...(await world.subprocess.run(req)),
+          exitCode: 9009, spawnFailed: false,
+        }),
+      },
+    };
+    const v = new Verifier(cmdExeNotFound, root, artifacts, [
+      { command: 'node -e "process.exit(0)"', mustExit: 0 },
+    ], 3);
+    const verdict = await v.evaluate(0);
+    expect(verdict.runnable).toBe(false);
+    expect(verdict.results[0]!.passed).toBe(false);
+  });
 });
