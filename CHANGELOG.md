@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `jam agent` — coding agent harness. Completion is decided by a deterministic
+  verifier rather than the model: a session reports `COMPLETED_VERIFIED` only
+  when every declared verification requirement ran and passed, and
+  `COMPLETED_UNVERIFIED` when none were declared. Every tool call is mediated by
+  a policy reference monitor and recorded in an append-only session journal.
+  Headless mode via `--json` with documented exit codes. **Limitation:** a
+  requirement's command is frozen as text at session start, not what it
+  resolves to, so a model that rewrites what that text resolves to (for
+  example `package.json`'s `scripts.test`) can still make a verified command
+  report success — the ordinary reward-hacking failure mode, not an exotic
+  attack.
+
 ## [0.12.0] - 2026-05-11
 
 ### Changed

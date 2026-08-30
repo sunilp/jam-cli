@@ -92,6 +92,55 @@ jam impact users.email           # cross-language column impact
 jam diagram --type architecture  # Mermaid architecture diagram
 ```
 
+## `jam agent` (experimental)
+
+A coding-agent harness: give it a task, it runs a tool-calling loop against
+your configured model, and it decides completion with a deterministic
+verifier rather than trusting the model's own claim. Every tool call goes
+through a policy reference monitor (auto-allow, ask, or deny) and is recorded
+in an append-only session journal, so a run is auditable and resumable.
+
+```bash
+jam agent "make the failing test in src/foo.test.ts pass"
+jam agent --json "..." > run.jsonl   # headless mode, one JSON event per line
+```
+
+Declare what must pass in `.jam/config.yaml`:
+
+```yaml
+verification:
+  required:
+    - command: npm test
+    - gitDiffCheck: true
+```
+
+Exit codes (see `exitCodeFor` in `src/commands/agent.ts`):
+
+| Code | Meaning |
+|---|---|
+| `0` | `COMPLETED_VERIFIED` — every declared requirement ran and passed |
+| `1` | `COMPLETED_PARTIAL` (retries exhausted) or `FAILED` |
+| `3` | `COMPLETED_UNVERIFIED` — nothing was declared to verify |
+| `4` | stopped (cancelled, or a tool-call/token/time budget ran out) |
+
+A denied or escalated tool call is not a separate exit code: the policy
+engine's decision is fed back to the model as a recoverable tool result, and
+only changes the outcome insofar as it changes what the model does next —
+which may still end in any of the states above.
+
+Requires **Node 22.5+** (it stores session history via the built-in
+`node:sqlite` module); every other jam command still runs on Node 20.
+`jam agent` fails fast with an actionable message on an older runtime rather
+than crashing.
+
+**Verification runs exactly the commands you declare** — it does not
+independently confirm what those commands mean. A requirement's command is
+frozen as text at session start, not what it resolves to, so an agent that
+edits a file the command depends on (for example `package.json`'s
+`scripts.test`) can still make a verified command report success. Treat
+`COMPLETED_VERIFIED` as "the commands you named ran and exited zero," not as
+an independent guarantee of correctness.
+
 ## Status
 
 - **v0.12.0** (current) — Sharp pivot from generic AI CLI to cross-language code intelligence. AI-assistant features (ask/chat/run/go and friends) archived to [`archive/ai-suite`](https://github.com/sunilp/jam-cli/tree/archive/ai-suite).
