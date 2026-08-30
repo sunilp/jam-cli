@@ -29,7 +29,13 @@ declare module 'tree-sitter' {
       descendantsOfType(type: string | string[]): SyntaxNode[];
     }
     interface Tree { rootNode: SyntaxNode }
-    type Language = unknown;
+    /**
+     * Opaque grammar handle. Deliberately an interface rather than `unknown`:
+     * `unknown` swallows `Language | null` unions (src/trace/parser.ts:41),
+     * which trips no-redundant-type-constituents when this stub is the one in
+     * use, i.e. exactly on the Windows runners this file exists to support.
+     */
+    interface Language { readonly nodeTypeCount?: number }
   }
 
   class Parser {
