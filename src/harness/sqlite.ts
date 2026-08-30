@@ -12,12 +12,29 @@ import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
  *
  * better-sqlite3 is deliberately not used: its native binding is compiled per
  * Node ABI and cannot be rebuilt offline here.
+ *
+ * Loading is deferred to first call, not done at module-evaluation time. On
+ * Node 20 (and on Node 22.5–22.12, where node:sqlite exists but is gated
+ * behind --experimental-sqlite) `require('node:sqlite')` throws
+ * ERR_UNKNOWN_BUILTIN_MODULE. A static require at the top of this module
+ * would crash every file that imports Journal or ArtifactStore purely by
+ * importing them — including at test-collection time, before
+ * assertNodeSupported (src/commands/agent.ts) ever gets a chance to run and
+ * produce an actionable error. Callers must invoke loadSqlite() inside their
+ * constructor, not at their own module scope, or the crash just moves one
+ * file over.
  */
 const nodeRequire = createRequire(import.meta.url);
 
-const { DatabaseSync } = nodeRequire('node:sqlite') as {
+interface SqliteModule {
   DatabaseSync: new (path: string) => DatabaseSyncType;
-};
+}
 
-export { DatabaseSync };
+let cached: SqliteModule | undefined;
+
+export function loadSqlite(): SqliteModule {
+  cached ??= nodeRequire('node:sqlite') as SqliteModule;
+  return cached;
+}
+
 export type { DatabaseSyncType };

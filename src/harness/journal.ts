@@ -1,4 +1,4 @@
-import { DatabaseSync, type DatabaseSyncType } from './sqlite.js';
+import { loadSqlite, type DatabaseSyncType } from './sqlite.js';
 import { uuidv7, LogicalClock } from './ids.js';
 import type { JournalEvent, RuntimeEvent, Requirement } from './events.js';
 
@@ -12,6 +12,7 @@ export class Journal {
   private readonly clocks = new Map<string, LogicalClock>();
 
   constructor(path: string) {
+    const { DatabaseSync } = loadSqlite();
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA journal_mode = WAL');  // node:sqlite has no db.pragma()
     this.db.exec(`

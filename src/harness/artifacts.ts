@@ -1,4 +1,4 @@
-import { DatabaseSync, type DatabaseSyncType } from './sqlite.js';
+import { loadSqlite, type DatabaseSyncType } from './sqlite.js';
 import { createHash } from 'node:crypto';
 
 export interface ArtifactRef { digest: string; size: number }
@@ -13,6 +13,7 @@ export class ArtifactStore {
   private readonly db: DatabaseSyncType;
 
   constructor(path: string) {
+    const { DatabaseSync } = loadSqlite();
     this.db = new DatabaseSync(path);
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS artifacts (
