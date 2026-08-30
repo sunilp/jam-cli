@@ -39,6 +39,11 @@ async function fixture(): Promise<string> {
     if (r.exitCode !== 0) throw new Error(r.stderr);
   };
   await git(['init', '-q']);
+  // Deterministic content regardless of the runner's global git config: a
+  // Windows box with core.autocrlf=true would otherwise rewrite LF to CRLF
+  // on checkout/restore paths these fixtures exercise (e.g. checkpoint
+  // restore does `git checkout <ref> -- .`), breaking exact-content asserts.
+  await git(['config', 'core.autocrlf', 'false']);
   await git(['config', 'user.email', 't@example.com']);
   await git(['config', 'user.name', 'T']);
 

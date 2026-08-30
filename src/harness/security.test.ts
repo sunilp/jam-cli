@@ -55,6 +55,11 @@ function makeDeps(approvals: DispatchDeps['approvals'] = new AutoApproveApproval
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'jam-sec-'));
   await git(['init', '-q']);
+  // Deterministic content regardless of the runner's global git config: a
+  // Windows box with core.autocrlf=true would otherwise rewrite LF to CRLF
+  // on checkout/restore paths these fixtures exercise (e.g. checkpoint
+  // restore does `git checkout <ref> -- .`), breaking exact-content asserts.
+  await git(['config', 'core.autocrlf', 'false']);
   await git(['config', 'user.email', 't@example.com']);
   await git(['config', 'user.name', 'T']);
   await mkdir(join(root, '.jam'));

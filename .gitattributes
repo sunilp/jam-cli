@@ -1,0 +1,13 @@
+# Force LF for tracked text, regardless of a runner's global core.autocrlf.
+# Windows CI legs otherwise checkout .ts/.md/.json sources with CRLF, which
+# is at best noise in diffs and at worst breaks anything doing exact string
+# comparison against file content.
+* text=auto eol=lf
+
+# Never touch fixtures that are binary or intentionally carry their own
+# line-ending bytes.
+*.png binary
+*.gif binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
