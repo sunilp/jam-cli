@@ -1,4 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
+import type * as fs from 'node:fs';
+import type * as readline from 'node:readline';
 
 vi.mock('../browser/session.js', () => ({
   BrowserSession: vi.fn().mockImplementation(() => ({
@@ -33,12 +35,12 @@ vi.mock('../ui/renderer.js', () => ({
 }));
 
 vi.mock('node:fs', async (importOriginal) => {
-  const actual = await importOriginal() as Record<string, unknown>;
+  const actual = await importOriginal<typeof fs>();
   return { ...actual, writeFileSync: vi.fn(), mkdirSync: vi.fn() };
 });
 
 vi.mock('node:readline', async (importOriginal) => {
-  const actual = await importOriginal() as Record<string, unknown>;
+  const actual = await importOriginal<typeof readline>();
   return {
     ...actual,
     createInterface: vi.fn().mockImplementation(() => ({

@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SessionRecorder } from './recorder.js';
-import type { SessionStep } from './types.js';
 
 describe('SessionRecorder', () => {
   let recorder: SessionRecorder;

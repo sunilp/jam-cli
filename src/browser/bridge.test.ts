@@ -15,11 +15,9 @@ import { McpManager } from '../mcp/manager.js';
 
 describe('BrowserBridge', () => {
   let bridge: BrowserBridge;
-  let mockManager: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockManager = vi.mocked(McpManager).mock.results[0]?.value;
     bridge = new BrowserBridge();
   });
 
